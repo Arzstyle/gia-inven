@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Kategori = { id: string; nama: string; deskripsi: string | null; created_at: string };
 type Subkategori = { id: string; nama: string; kategori_id: string };
@@ -30,6 +31,17 @@ export default function KategoriPage() {
   const [openKat, setOpenKat] = useState(false);
   const [editingKat, setEditingKat] = useState<Kategori | null>(null);
   const [formKat, setFormKat] = useState({ nama: "", deskripsi: "" });
+
+  // Dialog state for Add/Edit Subkategori
+  const [openSub, setOpenSub] = useState(false);
+  const [editingSub, setEditingSub] = useState<Subkategori | null>(null);
+  const [formSub, setFormSub] = useState({ nama: "" });
+
+  // Dialog state for Add/Edit Barang
+  const [openBrg, setOpenBrg] = useState(false);
+  const [editingBrg, setEditingBrg] = useState<any>(null);
+  const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", stok_minimum: "0" };
+  const [formBrg, setFormBrg] = useState(brgDefault);
 
   // Fetch
   const fetchCategories = async () => {
@@ -96,6 +108,72 @@ export default function KategoriPage() {
     fetchCategories();
   };
 
+  // Subkategori CRUD
+  const openAddSub = () => { setEditingSub(null); setFormSub({ nama: "" }); setOpenSub(true); };
+  const openEditSub = (sub: Subkategori, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSub(sub); setFormSub({ nama: sub.nama }); setOpenSub(true);
+  };
+  const handleSaveSub = async () => {
+    if (!formSub.nama.trim()) { toast.error("Nama wajib diisi"); return; }
+    if (editingSub) {
+      const { error } = await supabase.from("subkategori").update({ nama: formSub.nama }).eq("id", editingSub.id);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Subkategori diperbarui");
+      if (selectedSubcategory?.id === editingSub.id) setSelectedSubcategory({ ...selectedSubcategory, nama: formSub.nama } as any);
+    } else {
+      const { error } = await supabase.from("subkategori").insert({ nama: formSub.nama, kategori_id: selectedCategory!.id });
+      if (error) { toast.error(error.message); return; }
+      toast.success("Subkategori ditambahkan");
+    }
+    setOpenSub(false);
+    if (selectedCategory) fetchSubcategories(selectedCategory.id);
+  };
+
+  // Barang CRUD
+  const generatePrefix = (name: string) => {
+    const upper = name.toUpperCase().replace(/[^A-Z]/g, "");
+    const consonants = upper.replace(/[AIUEO]/g, "");
+    if (consonants.length >= 3) return consonants.substring(0, 3);
+    return upper.substring(0, 3).padEnd(3, "X");
+  };
+  const openAddBrg = async () => {
+    setEditingBrg(null);
+    const prefix = generatePrefix(selectedSubcategory?.nama || "BRG");
+    const { data: existing } = await supabase.from("barang").select("kode").like("kode", `${prefix}-%`).order("kode", { ascending: false }).limit(1);
+    let nextNum = 1;
+    if (existing && existing.length > 0) { nextNum = (parseInt(existing[0].kode.split("-")[1]) || 0) + 1; }
+    setFormBrg({ ...brgDefault, kode: `${prefix}-${String(nextNum).padStart(3, "0")}` });
+    setOpenBrg(true);
+  };
+  const openEditBrg = (item: any) => {
+    setEditingBrg(item);
+    setFormBrg({ kode: item.kode, nama: item.nama, harga_beli: String(item.harga_beli || 0), harga_jual: String(item.harga_jual || 0), satuan: item.satuan, stok_minimum: String(item.stok_minimum || 0) });
+    setOpenBrg(true);
+  };
+  const handleSaveBrg = async () => {
+    if (!formBrg.kode.trim() || !formBrg.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
+    const payload = { kode: formBrg.kode, nama: formBrg.nama, harga_beli: parseInt(formBrg.harga_beli) || 0, harga_jual: parseInt(formBrg.harga_jual) || 0, satuan: formBrg.satuan, stok_minimum: parseInt(formBrg.stok_minimum) || 0, kategori_id: selectedCategory?.id || null, subkategori_id: selectedSubcategory?.id || null };
+    if (editingBrg) {
+      const { error } = await supabase.from("barang").update(payload).eq("id", editingBrg.id);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Barang diperbarui");
+    } else {
+      const { error } = await supabase.from("barang").insert(payload);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Barang ditambahkan");
+    }
+    setOpenBrg(false);
+    if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+  };
+  const handleDeleteBrg = async (item: any) => {
+    if (!confirm(`Hapus barang "${item.nama}"?`)) return;
+    const { error } = await supabase.from("barang").delete().eq("id", item.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Barang dihapus");
+    if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+  };
+
   // Filters
   const filteredCat = categories.filter(c => c.nama.toLowerCase().includes(search.toLowerCase()));
   const filteredSub = subcategories.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
@@ -143,9 +221,17 @@ export default function KategoriPage() {
                 selectedSubcategory?.nama}
           </h1>
         </div>
-        {view === "kategori" && (
-          <Button size="sm" onClick={openAddKat}><Plus className="h-4 w-4 mr-1" />Tambah</Button>
-        )}
+        <div className="flex gap-2">
+          {view === "kategori" && (
+            <Button size="sm" onClick={openAddKat}><Plus className="h-4 w-4 mr-1" />Tambah Kategori</Button>
+          )}
+          {view === "subkategori" && (
+            <Button size="sm" onClick={openAddSub}><Plus className="h-4 w-4 mr-1" />Tambah Subkategori</Button>
+          )}
+          {view === "barang" && (
+            <Button size="sm" onClick={openAddBrg}><Plus className="h-4 w-4 mr-1" />Tambah Barang</Button>
+          )}
+        </div>
       </div>
 
       {/* Search */}
@@ -215,6 +301,9 @@ export default function KategoriPage() {
                   <h3 className="font-bold text-base truncate">{sub.nama}</h3>
                   <p className="text-xs text-muted-foreground mt-1">Lihat barang →</p>
                 </div>
+                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => openEditSub(sub, e)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
                 <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </CardContent>
             </Card>
@@ -244,12 +333,13 @@ export default function KategoriPage() {
                   <TableHead>Satuan</TableHead>
                   <TableHead className="text-right">Stok</TableHead>
                   <TableHead className="text-right">Status</TableHead>
+                  <TableHead className="w-20 text-center">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
                       <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
                       Belum ada barang di subkategori ini.
                     </TableCell>
@@ -287,6 +377,16 @@ export default function KategoriPage() {
                           <Badge variant="outline" className="text-green-600 border-green-600">Aman</Badge>
                         )}
                       </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex justify-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditBrg(item)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteBrg(item)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -305,6 +405,50 @@ export default function KategoriPage() {
             <div><Label>Deskripsi</Label><Textarea value={formKat.deskripsi} onChange={e => setFormKat(p => ({ ...p, deskripsi: e.target.value }))} rows={2} /></div>
           </div>
           <DialogFooter><Button onClick={handleSaveKat}>{editingKat ? "Simpan" : "Tambah"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Subkategori Dialog */}
+      <Dialog open={openSub} onOpenChange={setOpenSub}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingSub ? "Edit" : "Tambah"} Subkategori</DialogTitle>
+            <p className="text-sm text-muted-foreground">Kategori: {selectedCategory?.nama}</p>
+          </DialogHeader>
+          <div>
+            <Label>Nama Subkategori</Label>
+            <Input value={formSub.nama} onChange={e => setFormSub(p => ({ ...p, nama: e.target.value }))} placeholder="Nama subkategori" />
+          </div>
+          <DialogFooter><Button onClick={handleSaveSub}>Simpan</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Barang Dialog */}
+      <Dialog open={openBrg} onOpenChange={setOpenBrg}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingBrg ? "Edit" : "Tambah"} Barang</DialogTitle>
+            <p className="text-sm text-muted-foreground">Kategori: {selectedCategory?.nama} → {selectedSubcategory?.nama}</p>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Kode</Label><Input value={formBrg.kode} onChange={e => setFormBrg(p => ({ ...p, kode: e.target.value }))} /></div>
+            <div>
+              <Label>Satuan</Label>
+              <Select value={formBrg.satuan} onValueChange={v => setFormBrg(p => ({ ...p, satuan: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["pcs", "kg", "meter", "liter", "batang", "lembar", "sak", "roll", "set", "dus", "kaleng", "galon"].map(s => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2"><Label>Nama Barang</Label><Input value={formBrg.nama} onChange={e => setFormBrg(p => ({ ...p, nama: e.target.value }))} placeholder="Nama barang" /></div>
+            <div><Label>Harga Beli</Label><Input type="number" value={formBrg.harga_beli} onChange={e => setFormBrg(p => ({ ...p, harga_beli: e.target.value }))} /></div>
+            <div><Label>Harga Jual</Label><Input type="number" value={formBrg.harga_jual} onChange={e => setFormBrg(p => ({ ...p, harga_jual: e.target.value }))} /></div>
+            <div><Label>Stok Minimum</Label><Input type="number" value={formBrg.stok_minimum} onChange={e => setFormBrg(p => ({ ...p, stok_minimum: e.target.value }))} /></div>
+          </div>
+          <DialogFooter><Button onClick={handleSaveBrg}>Simpan</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

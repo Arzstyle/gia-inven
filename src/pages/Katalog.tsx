@@ -4,11 +4,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus } from "lucide-react";
+import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 export default function KatalogPage() {
@@ -22,8 +23,19 @@ export default function KatalogPage() {
     const [selectedSubcategory, setSelectedSubcategory] = useState<any>(null);
     const [search, setSearch] = useState("");
 
-    // Tambah Barang dialog
+    // Kategori dialog
+    const [katOpen, setKatOpen] = useState(false);
+    const [editingKat, setEditingKat] = useState<any>(null);
+    const [katForm, setKatForm] = useState({ nama: "", deskripsi: "" });
+
+    // Subkategori dialog
+    const [subOpen, setSubOpen] = useState(false);
+    const [editingSub, setEditingSub] = useState<any>(null);
+    const [subForm, setSubForm] = useState({ nama: "" });
+
+    // Barang dialog
     const [addOpen, setAddOpen] = useState(false);
+    const [editingBarang, setEditingBarang] = useState<any>(null);
     const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", stok_minimum: "0" };
     const [addForm, setAddForm] = useState(formDefault);
 
@@ -82,6 +94,55 @@ export default function KatalogPage() {
     const filteredSubcategories = subcategories.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
     const filteredItems = items.filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()));
 
+    // ========== KATEGORI CRUD ==========
+    const openAddKat = () => { setEditingKat(null); setKatForm({ nama: "", deskripsi: "" }); setKatOpen(true); };
+    const openEditKat = (e: React.MouseEvent, cat: any) => {
+        e.stopPropagation();
+        setEditingKat(cat);
+        setKatForm({ nama: cat.nama, deskripsi: cat.deskripsi || "" });
+        setKatOpen(true);
+    };
+    const handleSaveKat = async () => {
+        if (!katForm.nama.trim()) { toast.error("Nama kategori wajib diisi"); return; }
+        if (editingKat) {
+            const { error } = await supabase.from("kategori").update({ nama: katForm.nama, deskripsi: katForm.deskripsi || null }).eq("id", editingKat.id);
+            if (error) { toast.error(error.message); return; }
+            toast.success("Kategori diperbarui");
+            if (selectedCategory?.id === editingKat.id) setSelectedCategory({ ...selectedCategory, nama: katForm.nama, deskripsi: katForm.deskripsi });
+        } else {
+            const { error } = await supabase.from("kategori").insert({ nama: katForm.nama, deskripsi: katForm.deskripsi || null });
+            if (error) { toast.error(error.message); return; }
+            toast.success("Kategori ditambahkan");
+        }
+        setKatOpen(false);
+        fetchCategories();
+    };
+
+    // ========== SUBKATEGORI CRUD ==========
+    const openAddSub = () => { setEditingSub(null); setSubForm({ nama: "" }); setSubOpen(true); };
+    const openEditSub = (e: React.MouseEvent, sub: any) => {
+        e.stopPropagation();
+        setEditingSub(sub);
+        setSubForm({ nama: sub.nama });
+        setSubOpen(true);
+    };
+    const handleSaveSub = async () => {
+        if (!subForm.nama.trim()) { toast.error("Nama subkategori wajib diisi"); return; }
+        if (editingSub) {
+            const { error } = await supabase.from("subkategori").update({ nama: subForm.nama }).eq("id", editingSub.id);
+            if (error) { toast.error(error.message); return; }
+            toast.success("Subkategori diperbarui");
+            if (selectedSubcategory?.id === editingSub.id) setSelectedSubcategory({ ...selectedSubcategory, nama: subForm.nama });
+        } else {
+            const { error } = await supabase.from("subkategori").insert({ nama: subForm.nama, kategori_id: selectedCategory.id });
+            if (error) { toast.error(error.message); return; }
+            toast.success("Subkategori ditambahkan");
+        }
+        setSubOpen(false);
+        if (selectedCategory) fetchSubcategories(selectedCategory.id);
+    };
+
+    // ========== BARANG CRUD ==========
     const generatePrefix = (name: string) => {
         const upper = name.toUpperCase().replace(/[^A-Z]/g, "");
         const consonants = upper.replace(/[AIUEO]/g, "");
@@ -90,8 +151,8 @@ export default function KatalogPage() {
     };
 
     const openAddBarang = async () => {
+        setEditingBarang(null);
         const prefix = generatePrefix(selectedSubcategory?.nama || "BRG");
-        // Find next available number for this prefix
         const { data: existing } = await supabase
             .from("barang")
             .select("kode")
@@ -100,8 +161,7 @@ export default function KatalogPage() {
             .limit(1);
         let nextNum = 1;
         if (existing && existing.length > 0) {
-            const lastCode = existing[0].kode;
-            const lastNum = parseInt(lastCode.split("-")[1]) || 0;
+            const lastNum = parseInt(existing[0].kode.split("-")[1]) || 0;
             nextNum = lastNum + 1;
         }
         const autoCode = `${prefix}-${String(nextNum).padStart(3, "0")}`;
@@ -109,9 +169,22 @@ export default function KatalogPage() {
         setAddOpen(true);
     };
 
+    const openEditBarang = (item: any) => {
+        setEditingBarang(item);
+        setAddForm({
+            kode: item.kode,
+            nama: item.nama,
+            harga_beli: String(item.harga_beli || 0),
+            harga_jual: String(item.harga_jual || 0),
+            satuan: item.satuan,
+            stok_minimum: String(item.stok_minimum || 0),
+        });
+        setAddOpen(true);
+    };
+
     const handleSaveBarang = async () => {
         if (!addForm.kode.trim() || !addForm.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
-        const { error } = await supabase.from("barang").insert({
+        const payload = {
             kode: addForm.kode,
             nama: addForm.nama,
             harga_beli: parseInt(addForm.harga_beli) || 0,
@@ -120,10 +193,25 @@ export default function KatalogPage() {
             subkategori_id: selectedSubcategory?.id || null,
             satuan: addForm.satuan,
             stok_minimum: parseInt(addForm.stok_minimum) || 0,
-        });
-        if (error) { toast.error(error.message); return; }
-        toast.success("Barang berhasil ditambahkan!");
+        };
+        if (editingBarang) {
+            const { error } = await supabase.from("barang").update(payload).eq("id", editingBarang.id);
+            if (error) { toast.error(error.message); return; }
+            toast.success("Barang diperbarui");
+        } else {
+            const { error } = await supabase.from("barang").insert(payload);
+            if (error) { toast.error(error.message); return; }
+            toast.success("Barang berhasil ditambahkan!");
+        }
         setAddOpen(false);
+        if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+    };
+
+    const handleDeleteBarang = async (item: any) => {
+        if (!confirm(`Hapus barang "${item.nama}"?`)) return;
+        const { error } = await supabase.from("barang").delete().eq("id", item.id);
+        if (error) { toast.error(error.message); return; }
+        toast.success("Barang dihapus");
         if (selectedSubcategory) fetchItems(selectedSubcategory.id);
     };
 
@@ -160,11 +248,23 @@ export default function KatalogPage() {
                                     `Daftar Barang: ${selectedSubcategory?.nama}`}
                         </h1>
                     </div>
-                    {view === "barang" && (
-                        <Button size="sm" onClick={openAddBarang}>
-                            <Plus className="h-4 w-4 mr-1" />Tambah Barang
-                        </Button>
-                    )}
+                    <div className="flex gap-2">
+                        {view === "kategori" && (
+                            <Button size="sm" onClick={openAddKat}>
+                                <Plus className="h-4 w-4 mr-1" />Tambah Kategori
+                            </Button>
+                        )}
+                        {view === "subkategori" && (
+                            <Button size="sm" onClick={openAddSub}>
+                                <Plus className="h-4 w-4 mr-1" />Tambah Subkategori
+                            </Button>
+                        )}
+                        {view === "barang" && (
+                            <Button size="sm" onClick={openAddBarang}>
+                                <Plus className="h-4 w-4 mr-1" />Tambah Barang
+                            </Button>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -185,7 +285,7 @@ export default function KatalogPage() {
                     {filteredCategories.map((cat) => (
                         <Card
                             key={cat.id}
-                            className="cursor-pointer hover:bg-accent/50 transition-colors border-l-4 border-l-primary/0 hover:border-l-primary"
+                            className="cursor-pointer hover:bg-accent/50 transition-colors border-l-4 border-l-primary/0 hover:border-l-primary group relative"
                             onClick={() => handleSelectCategory(cat)}
                         >
                             <CardContent className="p-6 flex flex-col items-center text-center gap-3">
@@ -196,6 +296,14 @@ export default function KatalogPage() {
                                     <h3 className="font-bold text-lg">{cat.nama}</h3>
                                     <p className="text-sm text-muted-foreground line-clamp-2">{cat.deskripsi || "Tidak ada deskripsi"}</p>
                                 </div>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
+                                    onClick={(e) => openEditKat(e, cat)}
+                                >
+                                    <Pencil className="h-4 w-4" />
+                                </Button>
                             </CardContent>
                         </Card>
                     ))}
@@ -211,7 +319,7 @@ export default function KatalogPage() {
                     {filteredSubcategories.map((sub) => (
                         <Card
                             key={sub.id}
-                            className="cursor-pointer hover:bg-accent/50 transition-colors border-l-4 border-l-blue-500/0 hover:border-l-blue-500"
+                            className="cursor-pointer hover:bg-accent/50 transition-colors border-l-4 border-l-blue-500/0 hover:border-l-blue-500 group relative"
                             onClick={() => handleSelectSubcategory(sub)}
                         >
                             <CardContent className="p-6 flex flex-col items-center text-center gap-3">
@@ -222,6 +330,14 @@ export default function KatalogPage() {
                                     <h3 className="font-bold text-lg">{sub.nama}</h3>
                                     <p className="text-sm text-muted-foreground">Lihat Barang &rarr;</p>
                                 </div>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8"
+                                    onClick={(e) => openEditSub(e, sub)}
+                                >
+                                    <Pencil className="h-4 w-4" />
+                                </Button>
                             </CardContent>
                         </Card>
                     ))}
@@ -251,12 +367,13 @@ export default function KatalogPage() {
                                     <TableHead>Satuan</TableHead>
                                     <TableHead className="text-right">Stok</TableHead>
                                     <TableHead className="text-right">Status</TableHead>
+                                    <TableHead className="w-20 text-center">Aksi</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {filteredItems.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Belum ada barang di sini.</TableCell>
+                                        <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">Belum ada barang di sini.</TableCell>
                                     </TableRow>
                                 ) : filteredItems.map((item, i) => {
                                     const beli = Number(item.harga_beli) || 0;
@@ -291,6 +408,16 @@ export default function KatalogPage() {
                                                     <Badge variant="outline" className="text-green-600 border-green-600">Aman</Badge>
                                                 )}
                                             </TableCell>
+                                            <TableCell className="text-center">
+                                                <div className="flex justify-center gap-1">
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditBarang(item)}>
+                                                        <Pencil className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteBarang(item)}>
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
                                         </TableRow>
                                     );
                                 })}
@@ -300,11 +427,50 @@ export default function KatalogPage() {
                 </Card>
             )}
 
-            {/* DIALOG TAMBAH BARANG */}
+            {/* DIALOG KATEGORI */}
+            <Dialog open={katOpen} onOpenChange={setKatOpen}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>{editingKat ? "Edit Kategori" : "Tambah Kategori"}</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div>
+                            <Label>Nama Kategori</Label>
+                            <Input value={katForm.nama} onChange={e => setKatForm(p => ({ ...p, nama: e.target.value }))} placeholder="Nama kategori" />
+                        </div>
+                        <div>
+                            <Label>Deskripsi</Label>
+                            <Textarea value={katForm.deskripsi} onChange={e => setKatForm(p => ({ ...p, deskripsi: e.target.value }))} placeholder="Deskripsi (opsional)" rows={2} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={handleSaveKat}>Simpan</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* DIALOG SUBKATEGORI */}
+            <Dialog open={subOpen} onOpenChange={setSubOpen}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>{editingSub ? "Edit Subkategori" : "Tambah Subkategori"}</DialogTitle>
+                        <p className="text-sm text-muted-foreground">Kategori: {selectedCategory?.nama}</p>
+                    </DialogHeader>
+                    <div>
+                        <Label>Nama Subkategori</Label>
+                        <Input value={subForm.nama} onChange={e => setSubForm(p => ({ ...p, nama: e.target.value }))} placeholder="Nama subkategori" />
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={handleSaveSub}>Simpan</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* DIALOG BARANG */}
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Tambah Barang Baru</DialogTitle>
+                        <DialogTitle>{editingBarang ? "Edit Barang" : "Tambah Barang Baru"}</DialogTitle>
                         <p className="text-sm text-muted-foreground">
                             Kategori: {selectedCategory?.nama} → {selectedSubcategory?.nama}
                         </p>
