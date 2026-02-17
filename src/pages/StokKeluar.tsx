@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,8 +12,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
-import { Plus, Search, Filter, X, Check, ChevronsUpDown } from "lucide-react";
+import { Plus, Search, Filter, X, Check, ChevronsUpDown, Eye, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 
 export default function StokKeluar() {
   const { user } = useAuth();
@@ -33,6 +36,11 @@ export default function StokKeluar() {
   const [comboOpen, setComboOpen] = useState(false);
   const [dialogKat, setDialogKat] = useState("all");
   const [dialogSub, setDialogSub] = useState("all");
+
+  // Bon detail dialog
+  const [bonOpen, setBonOpen] = useState(false);
+  const [bonDetail, setBonDetail] = useState<any>(null);
+  const bonRef = useRef<HTMLDivElement>(null);
 
   const fetchData = async () => {
     const [skRes, brgRes, katRes, subRes] = await Promise.all([
@@ -101,6 +109,39 @@ export default function StokKeluar() {
   const hasFilters = search || filterKat !== "all" || filterSub !== "all";
   const clearFilters = () => { setSearch(""); setFilterKat("all"); setFilterSub("all"); };
 
+  const viewBon = async (nomorBon: string) => {
+    const bonCode = nomorBon.replace("Penjualan: ", "");
+    const { data: penjualan } = await supabase.from("penjualan").select("*").eq("nomor_bon", bonCode).single();
+    if (!penjualan) { toast.error("Bon tidak ditemukan"); return; }
+    const { data: items } = await supabase.from("penjualan_item").select("*, barang(kode, nama)").eq("penjualan_id", penjualan.id);
+    setBonDetail({
+      nomor_bon: penjualan.nomor_bon,
+      tanggal: new Date(penjualan.tanggal),
+      pembeli: penjualan.pembeli,
+      items: (items ?? []).map((it: any) => ({
+        nama: it.barang?.nama ?? "-",
+        jumlah: it.jumlah,
+        harga_jual: Number(it.harga_jual),
+        subtotal: Number(it.subtotal),
+      })),
+      total: Number(penjualan.total),
+      bayar: Number(penjualan.bayar),
+      kembali: Number(penjualan.kembali),
+    });
+    setBonOpen(true);
+  };
+
+  const handlePrintBon = () => {
+    const content = bonRef.current;
+    if (!content) return;
+    const printWindow = window.open("", "_blank", "width=400,height=600");
+    if (!printWindow) return;
+    printWindow.document.write(`<html><head><title>Bon - ${bonDetail?.nomor_bon}</title><style>body{margin:0;padding:10px;font-family:'Courier New',monospace;font-size:12px;}@media print{body{margin:0;}}</style></head><body>${content.innerHTML}</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 300);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -167,7 +208,19 @@ export default function StokKeluar() {
                 <TableCell className="font-mono text-xs">{s.barang?.kode}</TableCell>
                 <TableCell>{s.barang?.nama}</TableCell>
                 <TableCell className="text-right font-medium text-destructive">-{s.jumlah}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">{s.keterangan ?? "-"}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {s.keterangan?.startsWith("Penjualan: ") ? (
+                    <button
+                      className="text-primary hover:underline cursor-pointer flex items-center gap-1"
+                      onClick={() => viewBon(s.keterangan)}
+                    >
+                      <Eye className="h-3 w-3" />
+                      {s.keterangan}
+                    </button>
+                  ) : (
+                    s.keterangan ?? "-"
+                  )}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -251,6 +304,72 @@ export default function StokKeluar() {
             <div className="col-span-2"><Label>Keterangan</Label><Textarea value={form.keterangan} onChange={e => setForm(p => ({ ...p, keterangan: e.target.value }))} rows={1} /></div>
           </div>
           <DialogFooter><Button onClick={handleSave}>Simpan</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BON DETAIL DIALOG */}
+      <Dialog open={bonOpen} onOpenChange={setBonOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Detail Bon Penjualan</DialogTitle></DialogHeader>
+          <div ref={bonRef} style={{ fontFamily: "'Courier New', monospace", fontSize: "12px", lineHeight: "1.4", color: "#000", background: "#fff", padding: "16px" }}>
+            <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: "8px", marginBottom: "8px" }}>
+              <div style={{ fontSize: "18px", fontWeight: "bold" }}>GIA MULYA</div>
+              <div style={{ fontSize: "10px" }}>KONSTRUKSI & PEMASANGAN</div>
+              <div style={{ fontSize: "10px" }}>BENGKEL LAS · TOKO BANGUNAN</div>
+              <div style={{ fontSize: "9px", marginTop: "4px" }}>MENERIMA PESANAN:</div>
+              <div style={{ fontSize: "9px" }}>PAGAR - TERALIS - STAINLESS - KANOPI - GALVALUM - PLAT BAJA</div>
+              <div style={{ fontSize: "9px" }}>ALAT-ALAT LISTRIK</div>
+              <div style={{ fontSize: "10px", marginTop: "4px", fontWeight: "bold" }}>JL. NAGRAK CISAAT NO. 45 SUKABUMI</div>
+              <div style={{ fontSize: "10px", fontWeight: "bold" }}>HP/WA: 085217147864 / 082111648392</div>
+            </div>
+            <div style={{ marginBottom: "8px" }}>
+              <div>Nota No. : {bonDetail?.nomor_bon}</div>
+              <div>Tanggal : {bonDetail?.tanggal ? new Date(bonDetail.tanggal).toLocaleDateString("id-ID") : "-"}</div>
+              {bonDetail?.pembeli && <div>Kepada Yth. : {bonDetail.pembeli}</div>}
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+              <thead>
+                <tr style={{ borderTop: "1px solid #000", borderBottom: "1px solid #000" }}>
+                  <th style={{ textAlign: "left", padding: "4px 2px" }}>Banyak</th>
+                  <th style={{ textAlign: "left", padding: "4px 2px" }}>Nama Barang</th>
+                  <th style={{ textAlign: "right", padding: "4px 2px" }}>Harga</th>
+                  <th style={{ textAlign: "right", padding: "4px 2px" }}>Jumlah</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bonDetail?.items?.map((item: any, i: number) => (
+                  <tr key={i} style={{ borderBottom: "1px dotted #ccc" }}>
+                    <td style={{ padding: "3px 2px" }}>{item.jumlah}</td>
+                    <td style={{ padding: "3px 2px" }}>{item.nama}</td>
+                    <td style={{ textAlign: "right", padding: "3px 2px" }}>{item.harga_jual.toLocaleString("id-ID")}</td>
+                    <td style={{ textAlign: "right", padding: "3px 2px" }}>{item.subtotal.toLocaleString("id-ID")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ borderTop: "2px solid #000", marginTop: "4px", paddingTop: "4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px" }}>
+                <span>Jumlah Rp.</span><span>{bonDetail?.total?.toLocaleString("id-ID")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>Bayar</span><span>{bonDetail?.bayar?.toLocaleString("id-ID")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
+                <span>Kembali</span><span>{bonDetail?.kembali?.toLocaleString("id-ID")}</span>
+              </div>
+            </div>
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
+              <div style={{ textAlign: "center" }}><div>Tanda terima,</div><div style={{ marginTop: "40px" }}>____________</div></div>
+              <div style={{ textAlign: "center" }}><div>Hormat kami,</div><div style={{ marginTop: "40px" }}>____________</div></div>
+            </div>
+            <div style={{ textAlign: "center", marginTop: "12px", fontSize: "9px", fontStyle: "italic", borderTop: "1px solid #000", paddingTop: "4px" }}>
+              Perhatian !!! Barang yang sudah dibeli tidak dapat ditukar / dikembalikan
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBonOpen(false)}>Tutup</Button>
+            <Button onClick={handlePrintBon}><Printer className="h-4 w-4 mr-2" />Cetak Bon</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

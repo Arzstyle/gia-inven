@@ -9,6 +9,7 @@ import {
   FileBarChart,
   Activity,
   LogOut,
+  ShoppingCart,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,6 +31,7 @@ import { Package } from "lucide-react";
 const mainItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Katalog Barang", url: "/katalog", icon: FolderTree },
+  { title: "Penjualan", url: "/penjualan", icon: ShoppingCart },
 ];
 
 const masterItems = [

@@ -8,6 +8,7 @@ import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Katalog from "@/pages/Katalog";
+import Penjualan from "@/pages/Penjualan";
 import Kategori from "@/pages/Kategori";
 import Subkategori from "@/pages/Subkategori";
 import Barang from "@/pages/Barang";
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/" element={<AppLayout />}>
               <Route index element={<Dashboard />} />
               <Route path="katalog" element={<Katalog />} />
+              <Route path="penjualan" element={<Penjualan />} />
               <Route path="kategori" element={<Kategori />} />
               <Route path="subkategori" element={<Subkategori />} />
               <Route path="barang" element={<Barang />} />

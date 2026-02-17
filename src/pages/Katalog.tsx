@@ -4,8 +4,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight } from "lucide-react";
+import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 export default function KatalogPage() {
     const [view, setView] = useState<"kategori" | "subkategori" | "barang">("kategori");
@@ -17,6 +21,11 @@ export default function KatalogPage() {
     const [selectedCategory, setSelectedCategory] = useState<any>(null);
     const [selectedSubcategory, setSelectedSubcategory] = useState<any>(null);
     const [search, setSearch] = useState("");
+
+    // Tambah Barang dialog
+    const [addOpen, setAddOpen] = useState(false);
+    const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", stok_minimum: "0" };
+    const [addForm, setAddForm] = useState(formDefault);
 
     useEffect(() => {
         fetchCategories();
@@ -73,6 +82,51 @@ export default function KatalogPage() {
     const filteredSubcategories = subcategories.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
     const filteredItems = items.filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()));
 
+    const generatePrefix = (name: string) => {
+        const upper = name.toUpperCase().replace(/[^A-Z]/g, "");
+        const consonants = upper.replace(/[AIUEO]/g, "");
+        if (consonants.length >= 3) return consonants.substring(0, 3);
+        return upper.substring(0, 3).padEnd(3, "X");
+    };
+
+    const openAddBarang = async () => {
+        const prefix = generatePrefix(selectedSubcategory?.nama || "BRG");
+        // Find next available number for this prefix
+        const { data: existing } = await supabase
+            .from("barang")
+            .select("kode")
+            .like("kode", `${prefix}-%`)
+            .order("kode", { ascending: false })
+            .limit(1);
+        let nextNum = 1;
+        if (existing && existing.length > 0) {
+            const lastCode = existing[0].kode;
+            const lastNum = parseInt(lastCode.split("-")[1]) || 0;
+            nextNum = lastNum + 1;
+        }
+        const autoCode = `${prefix}-${String(nextNum).padStart(3, "0")}`;
+        setAddForm({ ...formDefault, kode: autoCode });
+        setAddOpen(true);
+    };
+
+    const handleSaveBarang = async () => {
+        if (!addForm.kode.trim() || !addForm.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
+        const { error } = await supabase.from("barang").insert({
+            kode: addForm.kode,
+            nama: addForm.nama,
+            harga_beli: parseInt(addForm.harga_beli) || 0,
+            harga_jual: parseInt(addForm.harga_jual) || 0,
+            kategori_id: selectedCategory?.id || null,
+            subkategori_id: selectedSubcategory?.id || null,
+            satuan: addForm.satuan,
+            stok_minimum: parseInt(addForm.stok_minimum) || 0,
+        });
+        if (error) { toast.error(error.message); return; }
+        toast.success("Barang berhasil ditambahkan!");
+        setAddOpen(false);
+        if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+    };
+
     return (
         <div className="space-y-6 animate-fade-in">
             {/* Header & Breadcrumb */}
@@ -106,6 +160,11 @@ export default function KatalogPage() {
                                     `Daftar Barang: ${selectedSubcategory?.nama}`}
                         </h1>
                     </div>
+                    {view === "barang" && (
+                        <Button size="sm" onClick={openAddBarang}>
+                            <Plus className="h-4 w-4 mr-1" />Tambah Barang
+                        </Button>
+                    )}
                 </div>
             </div>
 
@@ -240,6 +299,54 @@ export default function KatalogPage() {
                     </div>
                 </Card>
             )}
+
+            {/* DIALOG TAMBAH BARANG */}
+            <Dialog open={addOpen} onOpenChange={setAddOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Tambah Barang Baru</DialogTitle>
+                        <p className="text-sm text-muted-foreground">
+                            Kategori: {selectedCategory?.nama} → {selectedSubcategory?.nama}
+                        </p>
+                    </DialogHeader>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <Label>Kode</Label>
+                            <Input value={addForm.kode} onChange={e => setAddForm(p => ({ ...p, kode: e.target.value }))} />
+                        </div>
+                        <div>
+                            <Label>Satuan</Label>
+                            <Select value={addForm.satuan} onValueChange={v => setAddForm(p => ({ ...p, satuan: v }))}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {["pcs", "kg", "meter", "liter", "batang", "lembar", "sak", "roll", "set", "dus", "kaleng", "galon"].map(s => (
+                                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="col-span-2">
+                            <Label>Nama Barang</Label>
+                            <Input value={addForm.nama} onChange={e => setAddForm(p => ({ ...p, nama: e.target.value }))} placeholder="Nama barang" />
+                        </div>
+                        <div>
+                            <Label>Harga Beli</Label>
+                            <Input type="number" value={addForm.harga_beli} onChange={e => setAddForm(p => ({ ...p, harga_beli: e.target.value }))} />
+                        </div>
+                        <div>
+                            <Label>Harga Jual</Label>
+                            <Input type="number" value={addForm.harga_jual} onChange={e => setAddForm(p => ({ ...p, harga_jual: e.target.value }))} />
+                        </div>
+                        <div>
+                            <Label>Stok Minimum</Label>
+                            <Input type="number" value={addForm.stok_minimum} onChange={e => setAddForm(p => ({ ...p, stok_minimum: e.target.value }))} />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={handleSaveBarang}>Simpan</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
