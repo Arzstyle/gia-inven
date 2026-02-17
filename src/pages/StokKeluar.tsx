@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { useAuth } from "@/contexts/AuthContext";
@@ -9,23 +10,45 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Plus, Search, Filter, X, Check, ChevronsUpDown, Eye, Printer } from "lucide-react";
+import { Plus, Search, Filter, X, Check, ChevronsUpDown, Eye, Printer, TrendingUp, Package, DollarSign, CalendarDays, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 
+type Periode = "harian" | "mingguan" | "bulanan";
+
+function getDateRange(periode: Periode): { start: string; end: string } {
+  const now = new Date();
+  const end = now.toISOString().split("T")[0];
+  let start: Date;
+  if (periode === "harian") { start = new Date(now); }
+  else if (periode === "mingguan") { start = new Date(now); start.setDate(start.getDate() - 7); }
+  else { start = new Date(now.getFullYear(), now.getMonth(), 1); }
+  return { start: start.toISOString().split("T")[0], end };
+}
+
 export default function StokKeluar() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState<any[]>([]);
   const [barangList, setBarangList] = useState<any[]>([]);
   const [kategoriList, setKategoriList] = useState<any[]>([]);
   const [subkategoriList, setSubkategoriList] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ barang_id: "", jumlah: "", tanggal: new Date().toISOString().split("T")[0], keterangan: "" });
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  // Period & date filters
+  const [periode, setPeriode] = useState<Periode>("harian");
+  const [dateStart, setDateStart] = useState(getDateRange("harian").start);
+  const [dateEnd, setDateEnd] = useState(getDateRange("harian").end);
 
   // Table filters
   const [search, setSearch] = useState("");
@@ -37,15 +60,19 @@ export default function StokKeluar() {
   const [dialogKat, setDialogKat] = useState("all");
   const [dialogSub, setDialogSub] = useState("all");
 
-  // Bon detail dialog
-  const [bonOpen, setBonOpen] = useState(false);
-  const [bonDetail, setBonDetail] = useState<any>(null);
-  const bonRef = useRef<HTMLDivElement>(null);
+  // When periode changes, update date range
+  useEffect(() => {
+    const range = getDateRange(periode);
+    setDateStart(range.start);
+    setDateEnd(range.end);
+  }, [periode]);
 
   const fetchData = async () => {
     const [skRes, brgRes, katRes, subRes] = await Promise.all([
-      supabase.from("stok_keluar").select("*, barang(kode, nama, stok, kategori_id, subkategori_id)").order("created_at", { ascending: false }),
-      supabase.from("barang").select("id, kode, nama, stok, kategori_id, subkategori_id").order("nama"),
+      supabase.from("stok_keluar").select("*, barang(kode, nama, stok, harga_beli, harga_jual, kategori_id, subkategori_id)")
+        .gte("tanggal", dateStart).lte("tanggal", dateEnd)
+        .order("created_at", { ascending: false }),
+      supabase.from("barang").select("id, kode, nama, stok, harga_beli, harga_jual, kategori_id, subkategori_id").order("nama"),
       supabase.from("kategori").select("*").order("nama"),
       supabase.from("subkategori").select("*").order("nama"),
     ]);
@@ -54,7 +81,7 @@ export default function StokKeluar() {
     setKategoriList(katRes.data ?? []);
     setSubkategoriList(subRes.data ?? []);
   };
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [dateStart, dateEnd]);
 
   // Table filtered data
   const filteredData = data.filter(s => {
@@ -71,7 +98,7 @@ export default function StokKeluar() {
     ? subkategoriList
     : subkategoriList.filter(s => s.kategori_id === filterKat);
 
-  // Dialog barang filter by kategori/sub
+  // Dialog barang filter
   const filteredBarangDialog = barangList.filter(b => {
     const matchKat = dialogKat === "all" || b.kategori_id === dialogKat;
     const matchSub = dialogSub === "all" || b.subkategori_id === dialogSub;
@@ -83,6 +110,18 @@ export default function StokKeluar() {
     : subkategoriList.filter(s => s.kategori_id === dialogKat);
 
   const selectedBarang = barangList.find(b => b.id === form.barang_id);
+
+  // Summary calculations
+  const totalTransaksi = filteredData.length;
+  const totalQty = filteredData.reduce((s, d) => s + d.jumlah, 0);
+  const totalKeuntungan = filteredData.reduce((s, d) => {
+    const beli = Number(d.barang?.harga_beli) || 0;
+    const jual = Number(d.barang?.harga_jual) || 0;
+    return s + (jual - beli) * d.jumlah;
+  }, 0);
+  const totalPendapatan = filteredData.reduce((s, d) => {
+    return s + (Number(d.barang?.harga_jual) || 0) * d.jumlah;
+  }, 0);
 
   const handleSave = async () => {
     if (!form.barang_id || !form.jumlah) { toast.error("Barang dan jumlah wajib diisi"); return; }
@@ -109,44 +148,94 @@ export default function StokKeluar() {
   const hasFilters = search || filterKat !== "all" || filterSub !== "all";
   const clearFilters = () => { setSearch(""); setFilterKat("all"); setFilterSub("all"); };
 
-  const viewBon = async (nomorBon: string) => {
-    const bonCode = nomorBon.replace("Penjualan: ", "");
-    const { data: penjualan } = await supabase.from("penjualan").select("*").eq("nomor_bon", bonCode).single();
-    if (!penjualan) { toast.error("Bon tidak ditemukan"); return; }
-    const { data: items } = await supabase.from("penjualan_item").select("*, barang(kode, nama)").eq("penjualan_id", penjualan.id);
-    setBonDetail({
-      nomor_bon: penjualan.nomor_bon,
-      tanggal: new Date(penjualan.tanggal),
-      pembeli: penjualan.pembeli,
-      items: (items ?? []).map((it: any) => ({
-        nama: it.barang?.nama ?? "-",
-        jumlah: it.jumlah,
-        harga_jual: Number(it.harga_jual),
-        subtotal: Number(it.subtotal),
-      })),
-      total: Number(penjualan.total),
-      bayar: Number(penjualan.bayar),
-      kembali: Number(penjualan.kembali),
-    });
-    setBonOpen(true);
+  const viewDetail = (id: string) => {
+    navigate(`/stok-keluar/${id}`);
   };
 
-  const handlePrintBon = () => {
-    const content = bonRef.current;
-    if (!content) return;
-    const printWindow = window.open("", "_blank", "width=400,height=600");
-    if (!printWindow) return;
-    printWindow.document.write(`<html><head><title>Bon - ${bonDetail?.nomor_bon}</title><style>body{margin:0;padding:10px;font-family:'Courier New',monospace;font-size:12px;}@media print{body{margin:0;}}</style></head><body>${content.innerHTML}</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => { printWindow.print(); }, 300);
+  const periodeLabel = periode === "harian" ? "Hari Ini" : periode === "mingguan" ? "7 Hari Terakhir" : "Bulan Ini";
+
+  const handleResetData = async () => {
+    setConfirmReset(false);
+    const { error } = await supabase
+      .from("stok_keluar")
+      .delete()
+      .gte("tanggal", dateStart)
+      .lte("tanggal", dateEnd);
+    if (error) { toast.error(error.message); return; }
+    await logAktivitas("Reset Stok Keluar", `Data stok keluar periode ${dateStart} s/d ${dateEnd} dihapus (${data.length} record)`);
+    toast.success(`Data stok keluar periode ${dateStart} s/d ${dateEnd} berhasil direset`);
+    fetchData();
   };
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-xl font-bold">Stok Keluar</h1>
-        <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" />Tambah</Button>
+        <div className="flex items-center gap-2">
+          {data.length > 0 && (
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmReset(true)}>
+              <RotateCcw className="h-4 w-4 mr-1" />Reset Data
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" />Tambah</Button>
+        </div>
+      </div>
+
+      {/* Period Tabs + Date Range */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Tabs value={periode} onValueChange={v => setPeriode(v as Periode)} className="w-auto">
+          <TabsList>
+            <TabsTrigger value="harian">Harian</TabsTrigger>
+            <TabsTrigger value="mingguan">Mingguan</TabsTrigger>
+            <TabsTrigger value="bulanan">Bulanan</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="flex items-center gap-2 text-sm">
+          <CalendarDays className="h-4 w-4 text-muted-foreground" />
+          <Input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} className="w-[140px] h-9" />
+          <span className="text-muted-foreground">s/d</span>
+          <Input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} className="w-[140px] h-9" />
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card>
+          <CardContent className="p-4 flex items-center gap-3">
+            <Package className="h-5 w-5 text-blue-600" />
+            <div>
+              <p className="text-lg font-bold">{totalTransaksi}</p>
+              <p className="text-xs text-muted-foreground">Total Transaksi</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-3">
+            <Package className="h-5 w-5 text-destructive" />
+            <div>
+              <p className="text-lg font-bold">{totalQty}</p>
+              <p className="text-xs text-muted-foreground">Qty Keluar</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center gap-3">
+            <DollarSign className="h-5 w-5 text-blue-600" />
+            <div>
+              <p className="text-lg font-bold">{fmt(totalPendapatan)}</p>
+              <p className="text-xs text-muted-foreground">Total Pendapatan</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/20 dark:border-green-900">
+          <CardContent className="p-4 flex items-center gap-3">
+            <TrendingUp className="h-5 w-5 text-green-600" />
+            <div>
+              <p className="text-lg font-bold text-green-700 dark:text-green-400">{fmt(totalKeuntungan)}</p>
+              <p className="text-xs text-muted-foreground">Total Keuntungan</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Search & Filters */}
@@ -195,45 +284,75 @@ export default function StokKeluar() {
               <TableHead>Kode</TableHead>
               <TableHead>Barang</TableHead>
               <TableHead className="text-right">Jumlah</TableHead>
+              <TableHead className="text-right">Keuntungan</TableHead>
               <TableHead>Keterangan</TableHead>
+              <TableHead className="w-12 text-center">Detail</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredData.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Tidak ada data</TableCell></TableRow>
-            ) : filteredData.map((s, i) => (
-              <TableRow key={s.id}>
-                <TableCell>{i + 1}</TableCell>
-                <TableCell className="whitespace-nowrap">{new Date(s.tanggal).toLocaleDateString("id-ID")}</TableCell>
-                <TableCell className="font-mono text-xs">{s.barang?.kode}</TableCell>
-                <TableCell>{s.barang?.nama}</TableCell>
-                <TableCell className="text-right font-medium text-destructive">-{s.jumlah}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {s.keterangan?.startsWith("Penjualan: ") ? (
-                    <button
-                      className="text-primary hover:underline cursor-pointer flex items-center gap-1"
-                      onClick={() => viewBon(s.keterangan)}
-                    >
-                      <Eye className="h-3 w-3" />
-                      {s.keterangan}
-                    </button>
-                  ) : (
-                    s.keterangan ?? "-"
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">Tidak ada data stok keluar pada periode ini</TableCell></TableRow>
+            ) : (
+              <>
+                {filteredData.map((s, i) => {
+                  const beli = Number(s.barang?.harga_beli) || 0;
+                  const jual = Number(s.barang?.harga_jual) || 0;
+                  const profit = (jual - beli) * s.jumlah;
+                  return (
+                    <TableRow key={s.id} className="hover:bg-muted/50">
+                      <TableCell>{i + 1}</TableCell>
+                      <TableCell className="whitespace-nowrap">{new Date(s.tanggal).toLocaleDateString("id-ID")}</TableCell>
+                      <TableCell className="font-mono text-xs">{s.barang?.kode}</TableCell>
+                      <TableCell>{s.barang?.nama}</TableCell>
+                      <TableCell className="text-right font-medium text-destructive">-{s.jumlah}</TableCell>
+                      <TableCell className="text-right">
+                        {profit > 0 ? (
+                          <Badge variant="outline" className="text-green-600 border-green-600 font-mono text-xs">+{fmt(profit)}</Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
+                        {s.keterangan?.startsWith("Penjualan: ") ? (
+                          <button
+                            className="text-primary hover:underline cursor-pointer flex items-center gap-1"
+                            onClick={() => viewDetail(s.id)}
+                          >
+                            <Eye className="h-3 w-3" />
+                            {s.keterangan}
+                          </button>
+                        ) : (
+                          s.keterangan ?? "-"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => viewDetail(s.id)}>
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {/* Total Row */}
+                <TableRow className="bg-muted/50 font-bold border-t-2">
+                  <TableCell colSpan={4} className="text-right">TOTAL ({periodeLabel})</TableCell>
+                  <TableCell className="text-right text-destructive">-{totalQty}</TableCell>
+                  <TableCell className="text-right">
+                    <Badge className="bg-green-600 font-mono text-xs">{fmt(totalKeuntungan)}</Badge>
+                  </TableCell>
+                  <TableCell colSpan={2}></TableCell>
+                </TableRow>
+              </>
+            )}
           </TableBody>
         </Table>
       </div>
 
-      {/* Dialog */}
+      {/* DIALOG TAMBAH STOK KELUAR */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Tambah Stok Keluar</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
-
-            {/* Category filters */}
             <div className="col-span-2 flex gap-2">
               <div className="flex-1">
                 <Label className="text-xs text-muted-foreground">Kategori</Label>
@@ -257,7 +376,6 @@ export default function StokKeluar() {
               </div>
             </div>
 
-            {/* Searchable Combobox for Barang */}
             <div className="col-span-2">
               <Label>Barang</Label>
               <Popover open={comboOpen} onOpenChange={setComboOpen}>
@@ -307,71 +425,15 @@ export default function StokKeluar() {
         </DialogContent>
       </Dialog>
 
-      {/* BON DETAIL DIALOG */}
-      <Dialog open={bonOpen} onOpenChange={setBonOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Detail Bon Penjualan</DialogTitle></DialogHeader>
-          <div ref={bonRef} style={{ fontFamily: "'Courier New', monospace", fontSize: "12px", lineHeight: "1.4", color: "#000", background: "#fff", padding: "16px" }}>
-            <div style={{ textAlign: "center", borderBottom: "2px solid #000", paddingBottom: "8px", marginBottom: "8px" }}>
-              <div style={{ fontSize: "18px", fontWeight: "bold" }}>GIA MULYA</div>
-              <div style={{ fontSize: "10px" }}>KONSTRUKSI & PEMASANGAN</div>
-              <div style={{ fontSize: "10px" }}>BENGKEL LAS · TOKO BANGUNAN</div>
-              <div style={{ fontSize: "9px", marginTop: "4px" }}>MENERIMA PESANAN:</div>
-              <div style={{ fontSize: "9px" }}>PAGAR - TERALIS - STAINLESS - KANOPI - GALVALUM - PLAT BAJA</div>
-              <div style={{ fontSize: "9px" }}>ALAT-ALAT LISTRIK</div>
-              <div style={{ fontSize: "10px", marginTop: "4px", fontWeight: "bold" }}>JL. NAGRAK CISAAT NO. 45 SUKABUMI</div>
-              <div style={{ fontSize: "10px", fontWeight: "bold" }}>HP/WA: 085217147864 / 082111648392</div>
-            </div>
-            <div style={{ marginBottom: "8px" }}>
-              <div>Nota No. : {bonDetail?.nomor_bon}</div>
-              <div>Tanggal : {bonDetail?.tanggal ? new Date(bonDetail.tanggal).toLocaleDateString("id-ID") : "-"}</div>
-              {bonDetail?.pembeli && <div>Kepada Yth. : {bonDetail.pembeli}</div>}
-            </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-              <thead>
-                <tr style={{ borderTop: "1px solid #000", borderBottom: "1px solid #000" }}>
-                  <th style={{ textAlign: "left", padding: "4px 2px" }}>Banyak</th>
-                  <th style={{ textAlign: "left", padding: "4px 2px" }}>Nama Barang</th>
-                  <th style={{ textAlign: "right", padding: "4px 2px" }}>Harga</th>
-                  <th style={{ textAlign: "right", padding: "4px 2px" }}>Jumlah</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bonDetail?.items?.map((item: any, i: number) => (
-                  <tr key={i} style={{ borderBottom: "1px dotted #ccc" }}>
-                    <td style={{ padding: "3px 2px" }}>{item.jumlah}</td>
-                    <td style={{ padding: "3px 2px" }}>{item.nama}</td>
-                    <td style={{ textAlign: "right", padding: "3px 2px" }}>{item.harga_jual.toLocaleString("id-ID")}</td>
-                    <td style={{ textAlign: "right", padding: "3px 2px" }}>{item.subtotal.toLocaleString("id-ID")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ borderTop: "2px solid #000", marginTop: "4px", paddingTop: "4px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: "13px" }}>
-                <span>Jumlah Rp.</span><span>{bonDetail?.total?.toLocaleString("id-ID")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Bayar</span><span>{bonDetail?.bayar?.toLocaleString("id-ID")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
-                <span>Kembali</span><span>{bonDetail?.kembali?.toLocaleString("id-ID")}</span>
-              </div>
-            </div>
-            <div style={{ marginTop: "16px", display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
-              <div style={{ textAlign: "center" }}><div>Tanda terima,</div><div style={{ marginTop: "40px" }}>____________</div></div>
-              <div style={{ textAlign: "center" }}><div>Hormat kami,</div><div style={{ marginTop: "40px" }}>____________</div></div>
-            </div>
-            <div style={{ textAlign: "center", marginTop: "12px", fontSize: "9px", fontStyle: "italic", borderTop: "1px solid #000", paddingTop: "4px" }}>
-              Perhatian !!! Barang yang sudah dibeli tidak dapat ditukar / dikembalikan
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setBonOpen(false)}>Tutup</Button>
-            <Button onClick={handlePrintBon}><Printer className="h-4 w-4 mr-2" />Cetak Bon</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title="Reset Data Stok Keluar"
+        description={`Apakah Anda yakin ingin menghapus SEMUA data stok keluar periode ${dateStart} s/d ${dateEnd}? (${data.length} record) Tindakan ini tidak dapat dibatalkan.`}
+        variant="danger"
+        confirmLabel="Ya, Reset Semua"
+        onConfirm={handleResetData}
+      />
     </div>
   );
 }

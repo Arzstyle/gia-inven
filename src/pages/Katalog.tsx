@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { supabase } from "@/integrations/supabase/client";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 
 export default function KatalogPage() {
+    const { user } = useAuth();
     const [view, setView] = useState<"kategori" | "subkategori" | "barang">("kategori");
 
     const [categories, setCategories] = useState<any[]>([]);
@@ -33,10 +37,14 @@ export default function KatalogPage() {
     const [editingSub, setEditingSub] = useState<any>(null);
     const [subForm, setSubForm] = useState({ nama: "" });
 
+    // Confirm dialog state
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmTarget, setConfirmTarget] = useState<any>(null);
+
     // Barang dialog
     const [addOpen, setAddOpen] = useState(false);
     const [editingBarang, setEditingBarang] = useState<any>(null);
-    const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", stok_minimum: "0" };
+    const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0" };
     const [addForm, setAddForm] = useState(formDefault);
 
     useEffect(() => {
@@ -177,38 +185,80 @@ export default function KatalogPage() {
             harga_beli: String(item.harga_beli || 0),
             harga_jual: String(item.harga_jual || 0),
             satuan: item.satuan,
-            stok_minimum: String(item.stok_minimum || 0),
+            tambah_stok: "0", // Default 0 when editing
         });
         setAddOpen(true);
     };
 
     const handleSaveBarang = async () => {
         if (!addForm.kode.trim() || !addForm.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
-        const payload = {
-            kode: addForm.kode,
-            nama: addForm.nama,
-            harga_beli: parseInt(addForm.harga_beli) || 0,
-            harga_jual: parseInt(addForm.harga_jual) || 0,
-            kategori_id: selectedCategory?.id || null,
-            subkategori_id: selectedSubcategory?.id || null,
-            satuan: addForm.satuan,
-            stok_minimum: parseInt(addForm.stok_minimum) || 0,
-        };
+
+        const harga_beli = parseInt(addForm.harga_beli) || 0;
+        const harga_jual = parseInt(addForm.harga_jual) || 0;
+        const tambah_stok = parseInt(addForm.tambah_stok) || 0;
+
         if (editingBarang) {
-            const { error } = await supabase.from("barang").update(payload).eq("id", editingBarang.id);
+            // --- EDIT BARANG ---
+            // 1. Update detail barang
+            const updatePayload: any = {
+                kode: addForm.kode,
+                nama: addForm.nama,
+                harga_beli,
+                harga_jual,
+                kategori_id: selectedCategory?.id || null,
+                subkategori_id: selectedSubcategory?.id || null,
+                satuan: addForm.satuan,
+            };
+
+            const { error } = await supabase.from("barang").update(updatePayload).eq("id", editingBarang.id);
             if (error) { toast.error(error.message); return; }
-            toast.success("Barang diperbarui");
+
+            // 3. Jika ada tambah stok, catat ke stok_masuk & log
+            if (tambah_stok > 0) {
+                await supabase.from("stok_masuk").insert({
+                    barang_id: editingBarang.id,
+                    jumlah: tambah_stok,
+                    tanggal: new Date().toISOString().split("T")[0],
+                    keterangan: "Tambah Stok via Katalog",
+                    user_id: user?.id ?? null,
+                });
+                await logAktivitas("Tambah Stok", `${addForm.nama} +${tambah_stok}`);
+                toast.success(`Stok ${addForm.nama} bertambah +${tambah_stok}`);
+            } else {
+                await logAktivitas("Edit Barang", `${addForm.nama} diperbarui`);
+                toast.success("Barang diperbarui");
+            }
+
         } else {
-            const { error } = await supabase.from("barang").insert(payload);
+            // --- TAMBAH BARANG BARU ---
+            const { error } = await supabase.from("barang").insert({
+                kode: addForm.kode,
+                nama: addForm.nama,
+                harga_beli,
+                harga_jual,
+                kategori_id: selectedCategory?.id || null,
+                subkategori_id: selectedSubcategory?.id || null,
+                satuan: addForm.satuan,
+                stok: tambah_stok,
+                stok_minimum: 0,
+            });
             if (error) { toast.error(error.message); return; }
+            await logAktivitas("Tambah Barang", `${addForm.kode} - ${addForm.nama} (Stok: ${tambah_stok})`);
             toast.success("Barang berhasil ditambahkan!");
         }
         setAddOpen(false);
         if (selectedSubcategory) fetchItems(selectedSubcategory.id);
     };
 
-    const handleDeleteBarang = async (item: any) => {
-        if (!confirm(`Hapus barang "${item.nama}"?`)) return;
+    const handleDeleteBarang = (item: any) => {
+        setConfirmTarget(item);
+        setConfirmOpen(true);
+    };
+    const executeDeleteBarang = async () => {
+        const item = confirmTarget;
+        setConfirmOpen(false);
+        setConfirmTarget(null);
+        if (!item) return;
         const { error } = await supabase.from("barang").delete().eq("id", item.id);
         if (error) { toast.error(error.message); return; }
         toast.success("Barang dihapus");
@@ -504,8 +554,8 @@ export default function KatalogPage() {
                             <Input type="number" value={addForm.harga_jual} onChange={e => setAddForm(p => ({ ...p, harga_jual: e.target.value }))} />
                         </div>
                         <div>
-                            <Label>Stok Minimum</Label>
-                            <Input type="number" value={addForm.stok_minimum} onChange={e => setAddForm(p => ({ ...p, stok_minimum: e.target.value }))} />
+                            <Label>Tambah Stok</Label>
+                            <Input type="number" value={addForm.tambah_stok} onChange={e => setAddForm(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" />
                         </div>
                     </div>
                     <DialogFooter>
@@ -513,6 +563,16 @@ export default function KatalogPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={confirmOpen}
+                onOpenChange={setConfirmOpen}
+                title="Hapus Barang"
+                description={`Apakah Anda yakin ingin menghapus barang "${confirmTarget?.nama}"? Tindakan ini tidak dapat dibatalkan.`}
+                variant="danger"
+                confirmLabel="Ya, Hapus"
+                onConfirm={executeDeleteBarang}
+            />
         </div>
     );
 }

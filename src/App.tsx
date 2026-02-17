@@ -15,6 +15,7 @@ import Barang from "@/pages/Barang";
 import Supplier from "@/pages/Supplier";
 import StokMasuk from "@/pages/StokMasuk";
 import StokKeluar from "@/pages/StokKeluar";
+import StokKeluarDetail from "@/pages/StokKeluarDetail";
 import Laporan from "@/pages/Laporan";
 import LogAktivitas from "@/pages/LogAktivitas";
 import NotFound from "./pages/NotFound";
@@ -40,6 +41,7 @@ const App = () => (
               <Route path="supplier" element={<Supplier />} />
               <Route path="stok-masuk" element={<StokMasuk />} />
               <Route path="stok-keluar" element={<StokKeluar />} />
+              <Route path="stok-keluar/:id" element={<StokKeluarDetail />} />
               <Route path="laporan" element={<Laporan />} />
               <Route path="log-aktivitas" element={<LogAktivitas />} />
             </Route>

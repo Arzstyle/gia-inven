@@ -16,6 +16,11 @@ import { ShoppingCart, Plus, Trash2, Printer, Check, ChevronsUpDown, Save, Eye }
 import { cn } from "@/lib/utils";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
+const parseCurrency = (val: string): number => {
+    // Strip dots (thousand sep), spaces, "Rp" prefix, then parse
+    const cleaned = val.replace(/[^\d]/g, "");
+    return parseInt(cleaned, 10) || 0;
+};
 
 type CartItem = {
     barang_id: string;
@@ -53,6 +58,17 @@ export default function Penjualan() {
 
     useEffect(() => {
         fetchData();
+
+        const channel = supabase
+            .channel("realtime-penjualan")
+            .on("postgres_changes", { event: "*", schema: "public", table: "barang" }, () => {
+                fetchData();
+            })
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, []);
 
     const fetchData = async () => {
@@ -132,7 +148,7 @@ export default function Penjualan() {
     };
 
     const total = cart.reduce((s, c) => s + c.subtotal, 0);
-    const bayarNum = Number(bayar) || 0;
+    const bayarNum = parseCurrency(bayar);
     const kembali = bayarNum - total;
 
     const generateBonNumber = () => {
@@ -401,10 +417,18 @@ export default function Penjualan() {
                                 <div>
                                     <Label className="text-xs text-muted-foreground">Bayar</Label>
                                     <Input
-                                        type="number"
+                                        type="text"
+                                        inputMode="numeric"
                                         placeholder="Jumlah bayar"
                                         value={bayar}
-                                        onChange={e => setBayar(e.target.value)}
+                                        onChange={e => {
+                                            // Only allow digits and dots for formatting
+                                            const raw = e.target.value.replace(/[^\d]/g, "");
+                                            if (!raw) { setBayar(""); return; }
+                                            // Auto-format with dots as thousand separators
+                                            const formatted = parseInt(raw, 10).toLocaleString("id-ID");
+                                            setBayar(formatted);
+                                        }}
                                         className="h-10 text-lg font-bold"
                                     />
                                 </div>

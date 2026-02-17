@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -8,19 +10,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, TrendingUp } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, TrendingUp, ArrowUpDown, RotateCcw } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 
 export default function BarangPage() {
+  const { user } = useAuth();
   const [data, setData] = useState<any[]>([]);
   const [kategoriList, setKategoriList] = useState<any[]>([]);
   const [subkategoriList, setSubkategoriList] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"subkategori" | "tanggal" | "huruf">("huruf");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", kategori_id: "", subkategori_id: "", satuan: "pcs", stok_minimum: "0" };
+  const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "0" };
   const [form, setForm] = useState(formDefault);
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; variant: "danger" | "warning"; onConfirm: () => void }>({ open: false, title: "", description: "", variant: "danger", onConfirm: () => { } });
 
   const fetchData = async () => {
     const [brgRes, katRes, subRes] = await Promise.all([
@@ -42,7 +48,21 @@ export default function BarangPage() {
   useEffect(() => { fetchData(); }, []);
 
   const filteredSub = subkategoriList.filter(s => s.kategori_id === form.kategori_id);
-  const filtered = data.filter(d => d.nama.toLowerCase().includes(search.toLowerCase()) || d.kode.toLowerCase().includes(search.toLowerCase()));
+  const filtered = data
+    .filter(d => d.nama.toLowerCase().includes(search.toLowerCase()) || d.kode.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === "subkategori") {
+        const subA = a.subkategori?.nama || "";
+        const subB = b.subkategori?.nama || "";
+        if (subA !== subB) return subA.localeCompare(subB);
+        return a.nama.localeCompare(b.nama);
+      }
+      if (sortBy === "tanggal") {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+      // huruf (alphabetical)
+      return a.nama.localeCompare(b.nama);
+    });
 
   const openAdd = () => {
     setEditing(null);
@@ -61,31 +81,67 @@ export default function BarangPage() {
       kategori_id: b.kategori_id ?? "",
       subkategori_id: b.subkategori_id ?? "",
       satuan: b.satuan,
-      stok_minimum: String(b.stok_minimum)
+      tambah_stok: "0",
     });
     setOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.kode.trim() || !form.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
-    const payload = {
-      kode: form.kode,
-      nama: form.nama,
-      harga_beli: parseInt(form.harga_beli) || 0,
-      harga_jual: parseInt(form.harga_jual) || 0,
-      kategori_id: form.kategori_id || null,
-      subkategori_id: form.subkategori_id || null,
-      satuan: form.satuan,
-      stok_minimum: parseInt(form.stok_minimum) || 0,
-    };
+
+    const harga_beli = parseInt(form.harga_beli) || 0;
+    const harga_jual = parseInt(form.harga_jual) || 0;
+    const tambah_stok = parseInt(form.tambah_stok) || 0;
 
     if (editing) {
-      const { error } = await supabase.from("barang").update(payload).eq("id", editing.id);
+      // --- EDIT BARANG ---
+      const updatePayload: any = {
+        kode: form.kode,
+        nama: form.nama,
+        harga_beli,
+        harga_jual,
+        kategori_id: form.kategori_id || null,
+        subkategori_id: form.subkategori_id || null,
+        satuan: form.satuan,
+      };
+
+      const { error } = await supabase.from("barang").update(updatePayload).eq("id", editing.id);
       if (error) { toast.error(error.message); return; }
-      toast.success("Barang diperbarui");
+
+      // Catat ke stok_masuk & log aktivitas
+      if (tambah_stok > 0) {
+        await supabase.from("stok_masuk").insert({
+          barang_id: editing.id,
+          jumlah: tambah_stok,
+          tanggal: new Date().toISOString().split("T")[0],
+          keterangan: "Tambah Stok via Data Barang",
+          user_id: user?.id ?? null,
+        });
+        // Ambil stok terbaru untuk log
+        const { data: freshData } = await supabase.from("barang").select("stok").eq("id", editing.id).single();
+        const newTotal = freshData?.stok ?? tambah_stok;
+        await logAktivitas("Tambah Stok", `${form.nama} +${tambah_stok} (Total: ${newTotal})`);
+        toast.success(`Stok ${form.nama} bertambah +${tambah_stok} (Total: ${newTotal})`);
+      } else {
+        await logAktivitas("Edit Barang", `${form.nama} diperbarui`);
+        toast.success("Barang diperbarui");
+      }
+
     } else {
-      const { error } = await supabase.from("barang").insert(payload);
+      // --- TAMBAH BARANG BARU ---
+      const { error } = await supabase.from("barang").insert({
+        kode: form.kode,
+        nama: form.nama,
+        harga_beli,
+        harga_jual,
+        kategori_id: form.kategori_id || null,
+        subkategori_id: form.subkategori_id || null,
+        satuan: form.satuan,
+        stok: tambah_stok,
+        stok_minimum: 0,
+      });
       if (error) { toast.error(error.message); return; }
+      await logAktivitas("Tambah Barang", `${form.kode} - ${form.nama} (Stok: ${tambah_stok})`);
       toast.success("Barang ditambahkan");
     }
     setOpen(false);
@@ -93,11 +149,36 @@ export default function BarangPage() {
   };
 
   const handleDelete = async (b: any) => {
-    if (!confirm(`Hapus barang "${b.nama}"?`)) return;
-    const { error } = await supabase.from("barang").delete().eq("id", b.id);
-    if (error) { toast.error(error.message); return; }
-    toast.success("Barang dihapus");
-    fetchData();
+    setConfirmState({
+      open: true,
+      title: "Hapus Barang",
+      description: `Apakah Anda yakin ingin menghapus barang "${b.nama}"? Tindakan ini tidak dapat dibatalkan.`,
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("barang").delete().eq("id", b.id);
+        if (error) { toast.error(error.message); return; }
+        toast.success("Barang dihapus");
+        fetchData();
+      },
+    });
+  };
+
+  const handleResetStok = async (b: any) => {
+    setConfirmState({
+      open: true,
+      title: "Reset Stok",
+      description: `Apakah Anda yakin ingin mereset stok "${b.nama}" menjadi 0? Stok saat ini: ${b.stok}.`,
+      variant: "warning",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("barang").update({ stok: 0 }).eq("id", b.id);
+        if (error) { toast.error(error.message); return; }
+        await logAktivitas("Reset Stok", `${b.nama} stok direset ke 0 (sebelumnya: ${b.stok})`);
+        toast.success(`Stok ${b.nama} direset ke 0`);
+        fetchData();
+      },
+    });
   };
 
   // Profit calculation for form preview
@@ -112,9 +193,24 @@ export default function BarangPage() {
         <h1 className="text-xl font-bold">Data Barang</h1>
         <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Tambah</Button>
       </div>
-      <div className="relative max-w-xs">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Cari kode/nama..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8" />
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Cari kode/nama..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8" />
+        </div>
+        <div className="flex items-center gap-2">
+          <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+          <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Urutkan" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="huruf">Nama (A-Z)</SelectItem>
+              <SelectItem value="subkategori">Subkategori</SelectItem>
+              <SelectItem value="tanggal">Terbaru Ditambahkan</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="rounded-md border overflow-auto">
@@ -130,7 +226,7 @@ export default function BarangPage() {
               <TableHead className="text-right">H. Jual</TableHead>
               <TableHead className="text-right">Margin</TableHead>
               <TableHead className="text-right">Stok</TableHead>
-              <TableHead className="w-24">Aksi</TableHead>
+              <TableHead className="w-32">Aksi</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -167,8 +263,9 @@ export default function BarangPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(b)}><Pencil className="h-3 w-3" /></Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(b)}><Trash2 className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(b)} title="Edit"><Pencil className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500" onClick={() => handleResetStok(b)} title="Reset Stok"><RotateCcw className="h-3 w-3" /></Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(b)} title="Hapus"><Trash2 className="h-3 w-3" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -226,11 +323,21 @@ export default function BarangPage() {
             )}
 
             <div><Label>Satuan</Label><Input value={form.satuan} onChange={e => setForm(p => ({ ...p, satuan: e.target.value }))} /></div>
-            <div><Label>Stok Minimum</Label><Input type="number" value={form.stok_minimum} onChange={e => setForm(p => ({ ...p, stok_minimum: e.target.value }))} /></div>
+            <div><Label>Tambah Stok</Label><Input type="number" value={form.tambah_stok} onChange={e => setForm(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" /></div>
           </div>
           <DialogFooter><Button onClick={handleSave}>{editing ? "Simpan" : "Tambah"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmState.open}
+        onOpenChange={(o) => setConfirmState(p => ({ ...p, open: o }))}
+        title={confirmState.title}
+        description={confirmState.description}
+        variant={confirmState.variant}
+        confirmLabel={confirmState.variant === "danger" ? "Ya, Hapus" : "Ya, Reset"}
+        onConfirm={confirmState.onConfirm}
+      />
     </div>
   );
 }

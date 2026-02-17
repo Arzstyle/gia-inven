@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export default function SupplierPage() {
   const [data, setData] = useState<any[]>([]);
@@ -16,6 +17,7 @@ export default function SupplierPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ nama: "", kontak: "", alamat: "" });
+  const [confirmState, setConfirmState] = useState<{ open: boolean; target: any }>({ open: false, target: null });
 
   const fetch = async () => {
     const { data } = await supabase.from("supplier").select("*").order("nama");
@@ -46,8 +48,13 @@ export default function SupplierPage() {
     fetch();
   };
 
-  const handleDelete = async (s: any) => {
-    if (!confirm(`Hapus supplier "${s.nama}"?`)) return;
+  const handleDelete = (s: any) => {
+    setConfirmState({ open: true, target: s });
+  };
+  const executeDelete = async () => {
+    const s = confirmState.target;
+    setConfirmState({ open: false, target: null });
+    if (!s) return;
     const { error } = await supabase.from("supplier").delete().eq("id", s.id);
     if (error) { toast.error(error.message); return; }
     await logAktivitas("Hapus Supplier", `Menghapus supplier: ${s.nama}`);
@@ -108,6 +115,16 @@ export default function SupplierPage() {
           <DialogFooter><Button onClick={handleSave}>{editing ? "Simpan" : "Tambah"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmState.open}
+        onOpenChange={(o) => setConfirmState(p => ({ ...p, open: o }))}
+        title="Hapus Supplier"
+        description={`Apakah Anda yakin ingin menghapus supplier "${confirmState.target?.nama}"? Tindakan ini tidak dapat dibatalkan.`}
+        variant="danger"
+        confirmLabel="Ya, Hapus"
+        onConfirm={executeDelete}
+      />
     </div>
   );
 }

@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Printer, ArrowDownToLine, ArrowUpFromLine, TrendingUp, DollarSign } from "lucide-react";
+import { toast } from "sonner";
+import { Printer, ArrowDownToLine, ArrowUpFromLine, TrendingUp, DollarSign, CalendarDays, RotateCcw } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Periode = "harian" | "mingguan" | "bulanan";
 
@@ -33,18 +37,27 @@ const COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"
 export default function Laporan() {
   const [tab, setTab] = useState("keuntungan");
   const [periode, setPeriode] = useState<Periode>("bulanan");
+  const [dateStart, setDateStart] = useState(getDateRange("bulanan").start);
+  const [dateEnd, setDateEnd] = useState(getDateRange("bulanan").end);
   const [dataMasuk, setDataMasuk] = useState<any[]>([]);
   const [dataKeluar, setDataKeluar] = useState<any[]>([]);
   const [barangMap, setBarangMap] = useState<Record<string, any>>({});
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  // Sync period with date range
+  useEffect(() => {
+    const range = getDateRange(periode);
+    setDateStart(range.start);
+    setDateEnd(range.end);
+  }, [periode]);
 
   useEffect(() => {
-    const { start, end } = getDateRange(periode);
     const fetchAll = async () => {
       const [masukRes, keluarRes, brgRes] = await Promise.all([
         supabase.from("stok_masuk").select("*, barang(kode, nama, kategori(nama)), supplier(nama)")
-          .gte("tanggal", start).lte("tanggal", end).order("tanggal", { ascending: false }),
+          .gte("tanggal", dateStart).lte("tanggal", dateEnd).order("tanggal", { ascending: false }),
         supabase.from("stok_keluar").select("*, barang(kode, nama, harga_beli, harga_jual, kategori(nama))")
-          .gte("tanggal", start).lte("tanggal", end).order("tanggal", { ascending: false }),
+          .gte("tanggal", dateStart).lte("tanggal", dateEnd).order("tanggal", { ascending: false }),
         supabase.from("barang").select("id, kode, nama, harga_beli, harga_jual"),
       ]);
       setDataMasuk(masukRes.data ?? []);
@@ -54,7 +67,7 @@ export default function Laporan() {
       setBarangMap(map);
     };
     fetchAll();
-  }, [periode]);
+  }, [dateStart, dateEnd]);
 
   const totalMasuk = dataMasuk.reduce((s, d) => s + d.jumlah, 0);
   const totalKeluar = dataKeluar.reduce((s, d) => s + d.jumlah, 0);
@@ -116,11 +129,32 @@ export default function Laporan() {
 
   const handlePrint = () => window.print();
 
+  const handleResetData = async () => {
+    setConfirmReset(false);
+    const [masukErr, keluarErr] = await Promise.all([
+      supabase.from("stok_masuk").delete().gte("tanggal", dateStart).lte("tanggal", dateEnd),
+      supabase.from("stok_keluar").delete().gte("tanggal", dateStart).lte("tanggal", dateEnd),
+    ]).then(results => results.map(r => r.error));
+    if (masukErr) { toast.error(`Stok masuk: ${masukErr.message}`); return; }
+    if (keluarErr) { toast.error(`Stok keluar: ${keluarErr.message}`); return; }
+    await logAktivitas("Reset Laporan", `Data stok masuk & keluar periode ${dateStart} s/d ${dateEnd} dihapus`);
+    toast.success(`Data laporan periode ${dateStart} s/d ${dateEnd} berhasil direset`);
+    // Re-fetch
+    const [masukRes, keluarRes] = await Promise.all([
+      supabase.from("stok_masuk").select("*, barang(kode, nama, kategori(nama)), supplier(nama)")
+        .gte("tanggal", dateStart).lte("tanggal", dateEnd).order("tanggal", { ascending: false }),
+      supabase.from("stok_keluar").select("*, barang(kode, nama, harga_beli, harga_jual, kategori(nama))")
+        .gte("tanggal", dateStart).lte("tanggal", dateEnd).order("tanggal", { ascending: false }),
+    ]);
+    setDataMasuk(masukRes.data ?? []);
+    setDataKeluar(keluarRes.data ?? []);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-xl font-bold">Laporan</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Select value={periode} onValueChange={v => setPeriode(v as Periode)}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -129,7 +163,18 @@ export default function Laporan() {
               <SelectItem value="bulanan">Bulanan</SelectItem>
             </SelectContent>
           </Select>
+          <div className="flex items-center gap-2 text-sm">
+            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            <Input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)} className="w-[140px] h-9" />
+            <span className="text-muted-foreground">s/d</span>
+            <Input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)} className="w-[140px] h-9" />
+          </div>
           <Button variant="outline" size="sm" onClick={handlePrint}><Printer className="h-4 w-4 mr-1" />Cetak</Button>
+          {(dataMasuk.length > 0 || dataKeluar.length > 0) && (
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setConfirmReset(true)}>
+              <RotateCcw className="h-4 w-4 mr-1" />Reset Data
+            </Button>
+          )}
         </div>
       </div>
 
@@ -378,6 +423,16 @@ export default function Laporan() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title="Reset Data Laporan"
+        description={`Apakah Anda yakin ingin menghapus SEMUA data stok masuk (${dataMasuk.length}) dan stok keluar (${dataKeluar.length}) periode ${dateStart} s/d ${dateEnd}? Tindakan ini tidak dapat dibatalkan.`}
+        variant="danger"
+        confirmLabel="Ya, Reset Semua"
+        onConfirm={handleResetData}
+      />
     </div>
   );
 }

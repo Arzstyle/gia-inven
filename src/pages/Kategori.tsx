@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { logAktivitas } from "@/hooks/useLogAktivitas";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Kategori = { id: string; nama: string; deskripsi: string | null; created_at: string };
 type Subkategori = { id: string; nama: string; kategori_id: string };
@@ -19,6 +22,7 @@ type Barang = { id: string; kode: string; nama: string; harga_beli: number; harg
 type View = "kategori" | "subkategori" | "barang";
 
 export default function KategoriPage() {
+  const { user } = useAuth();
   const [view, setView] = useState<View>("kategori");
   const [categories, setCategories] = useState<Kategori[]>([]);
   const [subcategories, setSubcategories] = useState<Subkategori[]>([]);
@@ -37,10 +41,13 @@ export default function KategoriPage() {
   const [editingSub, setEditingSub] = useState<Subkategori | null>(null);
   const [formSub, setFormSub] = useState({ nama: "" });
 
+  // Confirm dialog
+  const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; variant: "danger" | "warning"; confirmLabel: string; onConfirm: () => void }>({ open: false, title: "", description: "", variant: "danger", confirmLabel: "Ya, Hapus", onConfirm: () => { } });
+
   // Dialog state for Add/Edit Barang
   const [openBrg, setOpenBrg] = useState(false);
   const [editingBrg, setEditingBrg] = useState<any>(null);
-  const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", stok_minimum: "0" };
+  const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0" };
   const [formBrg, setFormBrg] = useState(brgDefault);
 
   // Fetch
@@ -101,11 +108,20 @@ export default function KategoriPage() {
   };
   const handleDeleteKat = async (k: Kategori, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Hapus kategori "${k.nama}"?`)) return;
-    const { error } = await supabase.from("kategori").delete().eq("id", k.id);
-    if (error) { toast.error(error.message); return; }
-    toast.success("Kategori dihapus");
-    fetchCategories();
+    setConfirmState({
+      open: true,
+      title: "Hapus Kategori",
+      description: `Apakah Anda yakin ingin menghapus kategori "${k.nama}"? Semua subkategori di dalamnya juga akan terhapus.`,
+      variant: "danger",
+      confirmLabel: "Ya, Hapus",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("kategori").delete().eq("id", k.id);
+        if (error) { toast.error(error.message); return; }
+        toast.success("Kategori dihapus");
+        fetchCategories();
+      },
+    });
   };
 
   // Subkategori CRUD
@@ -148,30 +164,98 @@ export default function KategoriPage() {
   };
   const openEditBrg = (item: any) => {
     setEditingBrg(item);
-    setFormBrg({ kode: item.kode, nama: item.nama, harga_beli: String(item.harga_beli || 0), harga_jual: String(item.harga_jual || 0), satuan: item.satuan, stok_minimum: String(item.stok_minimum || 0) });
+    setFormBrg({ kode: item.kode, nama: item.nama, harga_beli: String(item.harga_beli || 0), harga_jual: String(item.harga_jual || 0), satuan: item.satuan, tambah_stok: "0" });
     setOpenBrg(true);
   };
   const handleSaveBrg = async () => {
     if (!formBrg.kode.trim() || !formBrg.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
-    const payload = { kode: formBrg.kode, nama: formBrg.nama, harga_beli: parseInt(formBrg.harga_beli) || 0, harga_jual: parseInt(formBrg.harga_jual) || 0, satuan: formBrg.satuan, stok_minimum: parseInt(formBrg.stok_minimum) || 0, kategori_id: selectedCategory?.id || null, subkategori_id: selectedSubcategory?.id || null };
+
+    const harga_beli = parseInt(formBrg.harga_beli) || 0;
+    const harga_jual = parseInt(formBrg.harga_jual) || 0;
+    const tambah_stok = parseInt(formBrg.tambah_stok) || 0;
+
     if (editingBrg) {
-      const { error } = await supabase.from("barang").update(payload).eq("id", editingBrg.id);
+      // --- EDIT BARANG ---
+      const updatePayload: any = {
+        kode: formBrg.kode,
+        nama: formBrg.nama,
+        harga_beli,
+        harga_jual,
+        satuan: formBrg.satuan,
+        kategori_id: selectedCategory?.id || null,
+        subkategori_id: selectedSubcategory?.id || null,
+      };
+
+      const { error } = await supabase.from("barang").update(updatePayload).eq("id", editingBrg.id);
       if (error) { toast.error(error.message); return; }
-      toast.success("Barang diperbarui");
+
+      if (tambah_stok > 0) {
+        await supabase.from("stok_masuk").insert({
+          barang_id: editingBrg.id,
+          jumlah: tambah_stok,
+          tanggal: new Date().toISOString().split("T")[0],
+          keterangan: "Tambah Stok via Kategori",
+          user_id: user?.id ?? null,
+        });
+        await logAktivitas("Tambah Stok", `${formBrg.nama} +${tambah_stok}`);
+        toast.success(`Stok ${formBrg.nama} bertambah +${tambah_stok}`);
+      } else {
+        await logAktivitas("Edit Barang", `${formBrg.nama} diperbarui`);
+        toast.success("Barang diperbarui");
+      }
+
     } else {
-      const { error } = await supabase.from("barang").insert(payload);
+      // --- TAMBAH BARANG BARU ---
+      const { error } = await supabase.from("barang").insert({
+        kode: formBrg.kode,
+        nama: formBrg.nama,
+        harga_beli,
+        harga_jual,
+        satuan: formBrg.satuan,
+        kategori_id: selectedCategory?.id || null,
+        subkategori_id: selectedSubcategory?.id || null,
+        stok: tambah_stok,
+        stok_minimum: 0,
+      });
       if (error) { toast.error(error.message); return; }
+      await logAktivitas("Tambah Barang", `${formBrg.kode} - ${formBrg.nama} (Stok: ${tambah_stok})`);
       toast.success("Barang ditambahkan");
     }
     setOpenBrg(false);
     if (selectedSubcategory) fetchItems(selectedSubcategory.id);
   };
   const handleDeleteBrg = async (item: any) => {
-    if (!confirm(`Hapus barang "${item.nama}"?`)) return;
-    const { error } = await supabase.from("barang").delete().eq("id", item.id);
-    if (error) { toast.error(error.message); return; }
-    toast.success("Barang dihapus");
-    if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+    setConfirmState({
+      open: true,
+      title: "Hapus Barang",
+      description: `Apakah Anda yakin ingin menghapus barang "${item.nama}"? Tindakan ini tidak dapat dibatalkan.`,
+      variant: "danger",
+      confirmLabel: "Ya, Hapus",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("barang").delete().eq("id", item.id);
+        if (error) { toast.error(error.message); return; }
+        toast.success("Barang dihapus");
+        if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+      },
+    });
+  };
+  const handleResetStokBrg = async (item: any) => {
+    setConfirmState({
+      open: true,
+      title: "Reset Stok",
+      description: `Apakah Anda yakin ingin mereset stok "${item.nama}" menjadi 0? Stok saat ini: ${item.stok}.`,
+      variant: "warning",
+      confirmLabel: "Ya, Reset",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("barang").update({ stok: 0 }).eq("id", item.id);
+        if (error) { toast.error(error.message); return; }
+        await logAktivitas("Reset Stok", `${item.nama} stok direset ke 0 (sebelumnya: ${item.stok})`);
+        toast.success(`Stok ${item.nama} direset ke 0`);
+        if (selectedSubcategory) fetchItems(selectedSubcategory.id);
+      },
+    });
   };
 
   // Filters
@@ -333,7 +417,7 @@ export default function KategoriPage() {
                   <TableHead>Satuan</TableHead>
                   <TableHead className="text-right">Stok</TableHead>
                   <TableHead className="text-right">Status</TableHead>
-                  <TableHead className="w-20 text-center">Aksi</TableHead>
+                  <TableHead className="w-28 text-center">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -379,10 +463,13 @@ export default function KategoriPage() {
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="flex justify-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditBrg(item)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditBrg(item)} title="Edit">
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteBrg(item)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500" onClick={() => handleResetStokBrg(item)} title="Reset Stok">
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteBrg(item)} title="Hapus">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -446,11 +533,21 @@ export default function KategoriPage() {
             <div className="col-span-2"><Label>Nama Barang</Label><Input value={formBrg.nama} onChange={e => setFormBrg(p => ({ ...p, nama: e.target.value }))} placeholder="Nama barang" /></div>
             <div><Label>Harga Beli</Label><Input type="number" value={formBrg.harga_beli} onChange={e => setFormBrg(p => ({ ...p, harga_beli: e.target.value }))} /></div>
             <div><Label>Harga Jual</Label><Input type="number" value={formBrg.harga_jual} onChange={e => setFormBrg(p => ({ ...p, harga_jual: e.target.value }))} /></div>
-            <div><Label>Stok Minimum</Label><Input type="number" value={formBrg.stok_minimum} onChange={e => setFormBrg(p => ({ ...p, stok_minimum: e.target.value }))} /></div>
+            <div><Label>Tambah Stok</Label><Input type="number" value={formBrg.tambah_stok} onChange={e => setFormBrg(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" /></div>
           </div>
           <DialogFooter><Button onClick={handleSaveBrg}>Simpan</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirmState.open}
+        onOpenChange={(o) => setConfirmState(p => ({ ...p, open: o }))}
+        title={confirmState.title}
+        description={confirmState.description}
+        variant={confirmState.variant}
+        confirmLabel={confirmState.confirmLabel}
+        onConfirm={confirmState.onConfirm}
+      />
     </div>
   );
 }
