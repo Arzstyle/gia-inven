@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e40af"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" fill="url(#bg)"/>
+  <g transform="translate(96,88)" fill="none" stroke="white" stroke-width="7" stroke-linejoin="round">
+    <rect x="-40" y="-25" width="80" height="55" rx="3"/>
+    <polyline points="-46,-25 0,-45 46,-25"/>
+    <line x1="0" y1="22" x2="0" y2="-5"/>
+    <polyline points="-12,7 0,-5 12,7"/>
+  </g>
+  <text x="96" y="155" text-anchor="middle" fill="white" font-family="Arial,sans-serif" font-weight="bold" font-size="22">GIA</text>
+</svg>
