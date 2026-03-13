@@ -24,7 +24,7 @@ export default function BarangPage() {
   const [sortBy, setSortBy] = useState<"subkategori" | "tanggal" | "huruf">("huruf");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "0" };
+  const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "0", stok_minimum: "0" };
   const [form, setForm] = useState(formDefault);
   const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; variant: "danger" | "warning"; onConfirm: () => void }>({ open: false, title: "", description: "", variant: "danger", onConfirm: () => { } });
 
@@ -82,6 +82,7 @@ export default function BarangPage() {
       subkategori_id: b.subkategori_id ?? "",
       satuan: b.satuan,
       tambah_stok: "0",
+      stok_minimum: String(b.stok_minimum || 0),
     });
     setOpen(true);
   };
@@ -92,6 +93,7 @@ export default function BarangPage() {
     const harga_beli = parseInt(form.harga_beli) || 0;
     const harga_jual = parseInt(form.harga_jual) || 0;
     const tambah_stok = parseInt(form.tambah_stok) || 0;
+    const stok_minimum = parseInt(form.stok_minimum) || 0;
 
     if (editing) {
       // --- EDIT BARANG ---
@@ -103,6 +105,7 @@ export default function BarangPage() {
         kategori_id: form.kategori_id || null,
         subkategori_id: form.subkategori_id || null,
         satuan: form.satuan,
+        stok_minimum,
       };
 
       const { error } = await supabase.from("barang").update(updatePayload).eq("id", editing.id);
@@ -138,7 +141,7 @@ export default function BarangPage() {
         subkategori_id: form.subkategori_id || null,
         satuan: form.satuan,
         stok: tambah_stok,
-        stok_minimum: 0,
+        stok_minimum,
       });
       if (error) { toast.error(error.message); return; }
       await logAktivitas("Tambah Barang", `${form.kode} - ${form.nama} (Stok: ${tambah_stok})`);
@@ -324,6 +327,7 @@ export default function BarangPage() {
 
             <div><Label>Satuan</Label><Input value={form.satuan} onChange={e => setForm(p => ({ ...p, satuan: e.target.value }))} /></div>
             <div><Label>Tambah Stok</Label><Input type="number" value={form.tambah_stok} onChange={e => setForm(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" /></div>
+            <div><Label>Stok Minimum</Label><Input type="number" value={form.stok_minimum} onChange={e => setForm(p => ({ ...p, stok_minimum: e.target.value }))} placeholder="0" /></div>
           </div>
           <DialogFooter><Button onClick={handleSave}>{editing ? "Simpan" : "Tambah"}</Button></DialogFooter>
         </DialogContent>

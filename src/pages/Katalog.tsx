@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2, ArrowUpDown } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -26,6 +26,7 @@ export default function KatalogPage() {
     const [selectedCategory, setSelectedCategory] = useState<any>(null);
     const [selectedSubcategory, setSelectedSubcategory] = useState<any>(null);
     const [search, setSearch] = useState("");
+    const [sortBy, setSortBy] = useState<"huruf" | "tanggal">("huruf");
 
     // Kategori dialog
     const [katOpen, setKatOpen] = useState(false);
@@ -44,7 +45,7 @@ export default function KatalogPage() {
     // Barang dialog
     const [addOpen, setAddOpen] = useState(false);
     const [editingBarang, setEditingBarang] = useState<any>(null);
-    const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0" };
+    const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0", stok_minimum: "0" };
     const [addForm, setAddForm] = useState(formDefault);
 
     useEffect(() => {
@@ -100,7 +101,12 @@ export default function KatalogPage() {
     // Filter Logic
     const filteredCategories = categories.filter(c => c.nama.toLowerCase().includes(search.toLowerCase()));
     const filteredSubcategories = subcategories.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
-    const filteredItems = items.filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()));
+    const filteredItems = items
+        .filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => {
+            if (sortBy === "tanggal") return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            return a.nama.localeCompare(b.nama);
+        });
 
     // ========== KATEGORI CRUD ==========
     const openAddKat = () => { setEditingKat(null); setKatForm({ nama: "", deskripsi: "" }); setKatOpen(true); };
@@ -186,6 +192,7 @@ export default function KatalogPage() {
             harga_jual: String(item.harga_jual || 0),
             satuan: item.satuan,
             tambah_stok: "0", // Default 0 when editing
+            stok_minimum: String(item.stok_minimum || 0),
         });
         setAddOpen(true);
     };
@@ -196,6 +203,7 @@ export default function KatalogPage() {
         const harga_beli = parseInt(addForm.harga_beli) || 0;
         const harga_jual = parseInt(addForm.harga_jual) || 0;
         const tambah_stok = parseInt(addForm.tambah_stok) || 0;
+        const stok_minimum = parseInt(addForm.stok_minimum) || 0;
 
         if (editingBarang) {
             // --- EDIT BARANG ---
@@ -208,6 +216,7 @@ export default function KatalogPage() {
                 kategori_id: selectedCategory?.id || null,
                 subkategori_id: selectedSubcategory?.id || null,
                 satuan: addForm.satuan,
+                stok_minimum,
             };
 
             const { error } = await supabase.from("barang").update(updatePayload).eq("id", editingBarang.id);
@@ -240,7 +249,7 @@ export default function KatalogPage() {
                 subkategori_id: selectedSubcategory?.id || null,
                 satuan: addForm.satuan,
                 stok: tambah_stok,
-                stok_minimum: 0,
+                stok_minimum,
             });
             if (error) { toast.error(error.message); return; }
             await logAktivitas("Tambah Barang", `${addForm.kode} - ${addForm.nama} (Stok: ${tambah_stok})`);
@@ -318,15 +327,29 @@ export default function KatalogPage() {
                 </div>
             </div>
 
-            {/* Search Bar */}
-            <div className="relative max-w-md">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                    placeholder={view === "barang" ? "Cari nama/kode barang..." : "Cari..."}
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9"
-                />
+            {/* Search Bar + Sort */}
+            <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative max-w-md flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        placeholder={view === "barang" ? "Cari nama/kode barang..." : "Cari..."}
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="pl-9"
+                    />
+                </div>
+                {view === "barang" && (
+                    <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
+                        <SelectTrigger className="w-[180px] h-9">
+                            <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="huruf">Nama A-Z</SelectItem>
+                            <SelectItem value="tanggal">Terbaru</SelectItem>
+                        </SelectContent>
+                    </Select>
+                )}
             </div>
 
             {/* VIEW: CATEGORIES */}
@@ -556,6 +579,10 @@ export default function KatalogPage() {
                         <div>
                             <Label>Tambah Stok</Label>
                             <Input type="number" value={addForm.tambah_stok} onChange={e => setAddForm(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" />
+                        </div>
+                        <div>
+                            <Label>Stok Minimum</Label>
+                            <Input type="number" value={addForm.stok_minimum} onChange={e => setAddForm(p => ({ ...p, stok_minimum: e.target.value }))} placeholder="0" />
                         </div>
                     </div>
                     <DialogFooter>

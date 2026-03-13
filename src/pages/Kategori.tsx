@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { Search, ArrowLeft, Folder, Layers, Package, ChevronRight, Plus, Pencil, Trash2, RotateCcw, ArrowUpDown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -30,6 +30,7 @@ export default function KategoriPage() {
   const [selectedCategory, setSelectedCategory] = useState<Kategori | null>(null);
   const [selectedSubcategory, setSelectedSubcategory] = useState<Subkategori | null>(null);
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"huruf" | "tanggal">("huruf");
 
   // Dialog state for Add/Edit Kategori
   const [openKat, setOpenKat] = useState(false);
@@ -47,7 +48,7 @@ export default function KategoriPage() {
   // Dialog state for Add/Edit Barang
   const [openBrg, setOpenBrg] = useState(false);
   const [editingBrg, setEditingBrg] = useState<any>(null);
-  const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0" };
+  const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0", stok_minimum: "0" };
   const [formBrg, setFormBrg] = useState(brgDefault);
 
   // Fetch
@@ -164,7 +165,7 @@ export default function KategoriPage() {
   };
   const openEditBrg = (item: any) => {
     setEditingBrg(item);
-    setFormBrg({ kode: item.kode, nama: item.nama, harga_beli: String(item.harga_beli || 0), harga_jual: String(item.harga_jual || 0), satuan: item.satuan, tambah_stok: "0" });
+    setFormBrg({ kode: item.kode, nama: item.nama, harga_beli: String(item.harga_beli || 0), harga_jual: String(item.harga_jual || 0), satuan: item.satuan, tambah_stok: "0", stok_minimum: String(item.stok_minimum || 0) });
     setOpenBrg(true);
   };
   const handleSaveBrg = async () => {
@@ -173,6 +174,7 @@ export default function KategoriPage() {
     const harga_beli = parseInt(formBrg.harga_beli) || 0;
     const harga_jual = parseInt(formBrg.harga_jual) || 0;
     const tambah_stok = parseInt(formBrg.tambah_stok) || 0;
+    const stok_minimum = parseInt(formBrg.stok_minimum) || 0;
 
     if (editingBrg) {
       // --- EDIT BARANG ---
@@ -182,6 +184,7 @@ export default function KategoriPage() {
         harga_beli,
         harga_jual,
         satuan: formBrg.satuan,
+        stok_minimum,
         kategori_id: selectedCategory?.id || null,
         subkategori_id: selectedSubcategory?.id || null,
       };
@@ -215,7 +218,7 @@ export default function KategoriPage() {
         kategori_id: selectedCategory?.id || null,
         subkategori_id: selectedSubcategory?.id || null,
         stok: tambah_stok,
-        stok_minimum: 0,
+        stok_minimum,
       });
       if (error) { toast.error(error.message); return; }
       await logAktivitas("Tambah Barang", `${formBrg.kode} - ${formBrg.nama} (Stok: ${tambah_stok})`);
@@ -261,7 +264,12 @@ export default function KategoriPage() {
   // Filters
   const filteredCat = categories.filter(c => c.nama.toLowerCase().includes(search.toLowerCase()));
   const filteredSub = subcategories.filter(s => s.nama.toLowerCase().includes(search.toLowerCase()));
-  const filteredItems = items.filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()));
+  const filteredItems = items
+    .filter(i => i.nama.toLowerCase().includes(search.toLowerCase()) || i.kode.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === "tanggal") return new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime();
+      return a.nama.localeCompare(b.nama);
+    });
 
   // Count subcategories per category (for display)
   const [subCounts, setSubCounts] = useState<Record<string, number>>({});
@@ -318,10 +326,24 @@ export default function KategoriPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Cari..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+      {/* Search + Sort */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Cari..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
+        </div>
+        {view === "barang" && (
+          <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
+            <SelectTrigger className="w-[180px] h-9">
+              <ArrowUpDown className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="huruf">Nama A-Z</SelectItem>
+              <SelectItem value="tanggal">Terbaru</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* === VIEW: CATEGORIES (Cards) === */}
@@ -534,6 +556,7 @@ export default function KategoriPage() {
             <div><Label>Harga Beli</Label><Input type="number" value={formBrg.harga_beli} onChange={e => setFormBrg(p => ({ ...p, harga_beli: e.target.value }))} /></div>
             <div><Label>Harga Jual</Label><Input type="number" value={formBrg.harga_jual} onChange={e => setFormBrg(p => ({ ...p, harga_jual: e.target.value }))} /></div>
             <div><Label>Tambah Stok</Label><Input type="number" value={formBrg.tambah_stok} onChange={e => setFormBrg(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" /></div>
+            <div><Label>Stok Minimum</Label><Input type="number" value={formBrg.stok_minimum} onChange={e => setFormBrg(p => ({ ...p, stok_minimum: e.target.value }))} placeholder="0" /></div>
           </div>
           <DialogFooter><Button onClick={handleSaveBrg}>Simpan</Button></DialogFooter>
         </DialogContent>
