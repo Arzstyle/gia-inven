@@ -10,13 +10,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowUpDown, Package, Eye } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowUpDown, Package, Eye, Folder } from "lucide-react";
 
 export default function SubkategoriPage() {
   const [data, setData] = useState<any[]>([]);
   const [kategoriList, setKategoriList] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"huruf" | "kategori" | "tanggal">("huruf");
+  const [selectedKategori, setSelectedKategori] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"huruf" | "huruf_desc" | "tanggal">("huruf");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ nama: "", kategori_id: "" });
@@ -54,17 +55,26 @@ export default function SubkategoriPage() {
   useEffect(() => { fetchData(); }, []);
 
   const filtered = data
-    .filter(d => d.nama.toLowerCase().includes(search.toLowerCase()) || (d.kategori?.nama || "").toLowerCase().includes(search.toLowerCase()))
+    .filter(d => {
+      const matchSearch =
+        d.nama.toLowerCase().includes(search.toLowerCase()) ||
+        (d.kategori?.nama || "").toLowerCase().includes(search.toLowerCase());
+
+      const matchKat =
+        selectedKategori === "all" ||
+        d.kategori_id === selectedKategori ||
+        d.kategori?.id === selectedKategori;
+
+      return matchSearch && matchKat;
+    })
     .sort((a, b) => {
-      if (sortBy === "kategori") {
-        const katA = a.kategori?.nama || "";
-        const katB = b.kategori?.nama || "";
-        if (katA !== katB) return katA.localeCompare(katB);
-        return a.nama.localeCompare(b.nama);
-      }
       if (sortBy === "tanggal") {
         return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
       }
+      if (sortBy === "huruf_desc") {
+        return b.nama.localeCompare(a.nama);
+      }
+      // default: A-Z
       return a.nama.localeCompare(b.nama);
     });
 
@@ -127,66 +137,133 @@ export default function SubkategoriPage() {
         <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Tambah</Button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
+      {/* Search, Filter Kategori, & Sorting */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Cari subkategori..." value={search} onChange={e => setSearch(e.target.value)} className="pl-8" />
+          <Input 
+            placeholder="Cari subkategori..." 
+            value={search} 
+            onChange={e => setSearch(e.target.value)} 
+            className="pl-8 bg-white border-slate-200" 
+          />
         </div>
+
+        {/* Filter Kategori */}
         <div className="flex items-center gap-2">
-          <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+          <Folder className="h-4 w-4 text-blue-600" />
+          <Select value={selectedKategori} onValueChange={setSelectedKategori}>
+            <SelectTrigger className="w-[210px] bg-white border-slate-200">
+              <SelectValue placeholder="Pilih Kategori" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Kategori ({data.length})</SelectItem>
+              {kategoriList.map(k => {
+                const count = data.filter(d => d.kategori_id === k.id).length;
+                return (
+                  <SelectItem key={k.id} value={k.id}>
+                    {k.nama} ({count})
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Sorting A-Z / Tanggal */}
+        <div className="flex items-center gap-2">
+          <ArrowUpDown className="h-4 w-4 text-slate-500" />
           <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[180px] bg-white border-slate-200">
               <SelectValue placeholder="Urutkan" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="huruf">Nama (A-Z)</SelectItem>
-              <SelectItem value="kategori">Kategori</SelectItem>
+              <SelectItem value="huruf">Nama (A - Z)</SelectItem>
+              <SelectItem value="huruf_desc">Nama (Z - A)</SelectItem>
               <SelectItem value="tanggal">Terbaru Ditambahkan</SelectItem>
             </SelectContent>
           </Select>
         </div>
+
+        {/* Reset Filter jika kategori dipilih */}
+        {selectedKategori !== "all" && (
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setSelectedKategori("all")}
+            className="text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 h-9 px-2.5"
+          >
+            Tampilkan Semua ✕
+          </Button>
+        )}
       </div>
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8">#</TableHead>
-              <TableHead>Nama</TableHead>
-              <TableHead>Kategori</TableHead>
-              <TableHead className="text-center">Jumlah Barang</TableHead>
-              <TableHead className="w-32">Aksi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Tidak ada data</TableCell></TableRow>
-            ) : filtered.map((s, i) => {
-              const count = itemCounts[s.id] || 0;
-              return (
-                <TableRow key={s.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openPreview(s)}>
-                  <TableCell>{i + 1}</TableCell>
-                  <TableCell className="font-medium">{s.nama}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{s.kategori?.nama ?? "-"}</TableCell>
-                  <TableCell className="text-center">
-                    {count > 0 ? (
-                      <Badge variant="outline" className="font-mono">{count} item</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-muted-foreground">Kosong</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPreview(s)} title="Lihat Isi"><Eye className="h-3 w-3" /></Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(s)} title="Edit"><Pencil className="h-3 w-3" /></Button>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(s)} title="Hapus"><Trash2 className="h-3 w-3" /></Button>
-                    </div>
+      {/* Tabel Subkategori */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-slate-50/90 border-b-2 border-blue-500">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10 text-center font-bold text-slate-500 text-xs">#</TableHead>
+                <TableHead className="font-bold text-blue-900 text-xs tracking-wider uppercase">Nama Subkategori</TableHead>
+                <TableHead className="font-bold text-blue-700 text-xs tracking-wider uppercase">Kategori Induk</TableHead>
+                <TableHead className="text-center font-bold text-slate-700 text-xs tracking-wider uppercase">Jumlah Barang</TableHead>
+                <TableHead className="w-32 text-center font-bold text-slate-700 text-xs tracking-wider uppercase">Aksi</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
+                    Tidak ada subkategori yang sesuai kriteria pencarian/filter.
                   </TableCell>
                 </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+              ) : filtered.map((s, i) => {
+                const count = itemCounts[s.id] || 0;
+                return (
+                  <TableRow key={s.id} className="cursor-pointer hover:bg-blue-50/40 transition-colors" onClick={() => openPreview(s)}>
+                    <TableCell className="text-center text-muted-foreground text-xs">{i + 1}</TableCell>
+                    <TableCell className="font-semibold text-slate-800 text-sm">{s.nama}</TableCell>
+                    <TableCell>
+                      {s.kategori?.nama ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                          {s.kategori.nama}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 text-xs">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {count > 0 ? (
+                        <Badge variant="outline" className="font-mono bg-blue-50/70 text-blue-700 border-blue-200 font-semibold">
+                          {count} item
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-muted-foreground text-xs">
+                          Kosong
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-center gap-1" onClick={e => e.stopPropagation()}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => openPreview(s)} title="Lihat Isi">
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => openEdit(s)} title="Edit">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleDelete(s)} title="Hapus">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {/* Add/Edit Dialog */}
