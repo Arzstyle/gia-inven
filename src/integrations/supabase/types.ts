@@ -18,6 +18,8 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          harga_beli: number
+          harga_jual: number
           kategori_id: string | null
           kode: string
           nama: string
@@ -29,6 +31,8 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          harga_beli?: number
+          harga_jual?: number
           kategori_id?: string | null
           kode: string
           nama: string
@@ -40,6 +44,8 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          harga_beli?: number
+          harga_jual?: number
           kategori_id?: string | null
           kode?: string
           nama?: string
@@ -248,6 +254,87 @@ export type Database = {
           nama?: string
         }
         Relationships: []
+      }
+      penjualan: {
+        Row: {
+          id: string
+          created_at: string
+          nomor_bon: string
+          tanggal: string
+          pembeli: string | null
+          total: number
+          bayar: number
+          kembali: number
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          nomor_bon: string
+          tanggal: string
+          pembeli?: string | null
+          total: number
+          bayar: number
+          kembali: number
+          user_id: string
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          nomor_bon?: string
+          tanggal?: string
+          pembeli?: string | null
+          total?: number
+          bayar?: number
+          kembali?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      penjualan_item: {
+        Row: {
+          id: string
+          created_at: string
+          penjualan_id: string
+          barang_id: string
+          jumlah: number
+          harga_jual: number
+          subtotal: number
+        }
+        Insert: {
+          id?: string
+          created_at?: string
+          penjualan_id: string
+          barang_id: string
+          jumlah: number
+          harga_jual: number
+          subtotal: number
+        }
+        Update: {
+          id?: string
+          created_at?: string
+          penjualan_id?: string
+          barang_id?: string
+          jumlah?: number
+          harga_jual?: number
+          subtotal?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "penjualan_item_penjualan_id_fkey"
+            columns: ["penjualan_id"]
+            isOneToOne: false
+            referencedRelation: "penjualan"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "penjualan_item_barang_id_fkey"
+            columns: ["barang_id"]
+            isOneToOne: false
+            referencedRelation: "barang"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

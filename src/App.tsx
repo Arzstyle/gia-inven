@@ -7,12 +7,12 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
-import Katalog from "@/pages/Katalog";
+
 import Penjualan from "@/pages/Penjualan";
 import Kategori from "@/pages/Kategori";
 import Subkategori from "@/pages/Subkategori";
 import Barang from "@/pages/Barang";
-import Supplier from "@/pages/Supplier";
+
 import StokMasuk from "@/pages/StokMasuk";
 import StokKeluar from "@/pages/StokKeluar";
 import StokKeluarDetail from "@/pages/StokKeluarDetail";
@@ -33,12 +33,12 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<AppLayout />}>
               <Route index element={<Dashboard />} />
-              <Route path="katalog" element={<Katalog />} />
+
               <Route path="penjualan" element={<Penjualan />} />
               <Route path="kategori" element={<Kategori />} />
               <Route path="subkategori" element={<Subkategori />} />
               <Route path="barang" element={<Barang />} />
-              <Route path="supplier" element={<Supplier />} />
+
               <Route path="stok-masuk" element={<StokMasuk />} />
               <Route path="stok-keluar" element={<StokKeluar />} />
               <Route path="stok-keluar/:id" element={<StokKeluarDetail />} />

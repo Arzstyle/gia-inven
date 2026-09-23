@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,7 +25,7 @@ export default function BarangPage() {
   const [sortBy, setSortBy] = useState<"subkategori" | "tanggal" | "huruf">("huruf");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const formDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "0", stok_minimum: "0" };
+  const formDefault = { kode: "", nama: "", harga_beli: "", harga_jual: "", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "", stok_minimum: "" };
   const [form, setForm] = useState(formDefault);
   const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; variant: "danger" | "warning"; onConfirm: () => void }>({ open: false, title: "", description: "", variant: "danger", onConfirm: () => { } });
 
@@ -76,13 +77,13 @@ export default function BarangPage() {
     setForm({
       kode: b.kode,
       nama: b.nama,
-      harga_beli: String(b.harga_beli || 0),
-      harga_jual: String(b.harga_jual || 0),
+      harga_beli: b.harga_beli ? String(b.harga_beli) : "",
+      harga_jual: b.harga_jual ? String(b.harga_jual) : "",
       kategori_id: b.kategori_id ?? "",
       subkategori_id: b.subkategori_id ?? "",
       satuan: b.satuan,
-      tambah_stok: "0",
-      stok_minimum: String(b.stok_minimum || 0),
+      tambah_stok: "",
+      stok_minimum: b.stok_minimum ? String(b.stok_minimum) : "",
     });
     setOpen(true);
   };

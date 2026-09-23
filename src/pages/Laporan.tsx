@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { logAktivitas } from "@/hooks/useLogAktivitas";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Printer, ArrowDownToLine, ArrowUpFromLine, TrendingUp, DollarSign, CalendarDays, RotateCcw } from "lucide-react";
+import { Printer, ArrowDownToLine, ArrowUpFromLine, TrendingUp, DollarSign, CalendarDays, RotateCcw, PieChart as PieChartIcon, List, Package } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -220,9 +221,9 @@ export default function Laporan() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="keuntungan">💰 Keuntungan</TabsTrigger>
-          <TabsTrigger value="masuk">📥 Stok Masuk</TabsTrigger>
-          <TabsTrigger value="keluar">📤 Stok Keluar</TabsTrigger>
+          <TabsTrigger value="keuntungan" className="flex items-center gap-2"><DollarSign className="w-4 h-4" /> Keuntungan</TabsTrigger>
+          <TabsTrigger value="masuk" className="flex items-center gap-2"><ArrowDownToLine className="w-4 h-4" /> Stok Masuk</TabsTrigger>
+          <TabsTrigger value="keluar" className="flex items-center gap-2"><ArrowUpFromLine className="w-4 h-4" /> Stok Keluar</TabsTrigger>
         </TabsList>
 
         {/* KEUNTUNGAN TAB */}
@@ -232,7 +233,7 @@ export default function Laporan() {
             {/* Bar Chart: Profit per Item */}
             <Card>
               <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm">📊 Keuntungan per Barang (Top 8)</CardTitle>
+                <CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4 text-slate-500" /> Keuntungan per Barang (Top 8)</CardTitle>
               </CardHeader>
               <CardContent className="p-2">
                 {profitChartData.length === 0 ? (
@@ -256,7 +257,7 @@ export default function Laporan() {
             {/* Pie Chart: Profit by Category */}
             <Card>
               <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm">🥧 Keuntungan per Kategori</CardTitle>
+                <CardTitle className="text-sm flex items-center gap-2"><PieChartIcon className="w-4 h-4 text-slate-500" /> Keuntungan per Kategori</CardTitle>
               </CardHeader>
               <CardContent className="p-2">
                 {pieData.length === 0 ? (
@@ -278,7 +279,7 @@ export default function Laporan() {
           {/* Profit Table */}
           <Card>
             <CardHeader className="py-3 px-4">
-              <CardTitle className="text-sm">📋 Rincian Keuntungan per Barang ({periodeLabel(periode)})</CardTitle>
+              <CardTitle className="text-sm flex items-center gap-2"><List className="w-4 h-4 text-slate-500" /> Rincian Keuntungan per Barang ({periodeLabel(periode)})</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -375,7 +376,7 @@ export default function Laporan() {
           {topSoldData.length > 0 && (
             <Card>
               <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm">📦 Barang Paling Banyak Keluar ({periodeLabel(periode)})</CardTitle>
+                <CardTitle className="text-sm flex items-center gap-2"><Package className="w-4 h-4 text-slate-500" /> Barang Paling Banyak Keluar ({periodeLabel(periode)})</CardTitle>
               </CardHeader>
               <CardContent className="p-2">
                 <ResponsiveContainer width="100%" height={250}>

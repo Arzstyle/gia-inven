@@ -30,7 +30,6 @@ import { Package } from "lucide-react";
 
 const mainItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "Katalog Barang", url: "/katalog", icon: FolderTree },
   { title: "Penjualan", url: "/penjualan", icon: ShoppingCart },
 ];
 
@@ -38,7 +37,6 @@ const masterItems = [
   { title: "Kategori", url: "/kategori", icon: FolderTree },
   { title: "Subkategori", url: "/subkategori", icon: Layers },
   { title: "Barang", url: "/barang", icon: Box },
-  { title: "Supplier", url: "/supplier", icon: Truck },
 ];
 
 const stokItems = [
@@ -83,16 +81,18 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-sidebar-accent rounded flex items-center justify-center">
-            <Package className="h-4 w-4 text-sidebar-accent-foreground" />
-          </div>
-          <div className="leading-none">
-            <p className="font-semibold text-sm text-sidebar-foreground">GIA</p>
-            <p className="text-xs text-sidebar-foreground/60">Toko Bangunan</p>
-          </div>
-        </div>
+      <SidebarHeader className="border-b border-sidebar-border px-4 py-4 flex flex-row items-center gap-3 bg-white">
+        <img 
+          src="/logo-gia.jpeg" 
+          alt="GIA Logo" 
+          className="h-9 w-auto object-contain flex-shrink-0"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
+        />
+        <span className="font-bold text-base text-slate-800 tracking-tight truncate">
+          TB. GIA MULYA
+        </span>
       </SidebarHeader>
       <SidebarContent>
         <MenuSection label="Utama" items={mainItems} />

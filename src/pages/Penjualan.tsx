@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { logAktivitas } from "@/hooks/useLogAktivitas";
@@ -17,7 +18,6 @@ import { cn } from "@/lib/utils";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 const parseCurrency = (val: string): number => {
-    // Strip dots (thousand sep), spaces, "Rp" prefix, then parse
     const cleaned = val.replace(/[^\d]/g, "");
     return parseInt(cleaned, 10) || 0;
 };
@@ -160,7 +160,9 @@ export default function Penjualan() {
 
     const handleSave = async () => {
         if (cart.length === 0) { toast.error("Keranjang masih kosong"); return; }
-        if (bayarNum < total) { toast.error("Jumlah bayar kurang dari total"); return; }
+        
+        const finalBayar = bayarNum >= total ? bayarNum : total;
+        const finalKembali = finalBayar - total;
 
         const nomorBon = generateBonNumber();
 
@@ -170,8 +172,8 @@ export default function Penjualan() {
             tanggal: new Date().toISOString().split("T")[0],
             pembeli: pembeli || null,
             total,
-            bayar: bayarNum,
-            kembali,
+            bayar: finalBayar,
+            kembali: finalKembali,
             user_id: user!.id,
         }).select().single();
 
@@ -191,17 +193,12 @@ export default function Penjualan() {
 
         await logAktivitas("Penjualan", `${nomorBon} - ${cart.length} item - ${fmt(total)}`);
 
-        setSavedBon({
-            nomor_bon: nomorBon,
-            tanggal: new Date(),
-            pembeli,
-            items: [...cart],
-            total,
-            bayar: bayarNum,
-            kembali,
-        });
-        setBonOpen(true);
+        setSavedBon(null);
+        setCart([]);
+        setPembeli("");
+        setBayar("");
         toast.success("Penjualan berhasil disimpan!");
+        fetchData();
     };
 
     const handlePrint = () => {
@@ -243,7 +240,7 @@ export default function Penjualan() {
         setSavedBon({
             nomor_bon: penjualan.nomor_bon,
             tanggal: new Date(penjualan.tanggal),
-            pembeli: penjualan.pembeli,
+            pembeli: penjualan.pembeli ?? "",
             items: (items ?? []).map((it: any) => ({
                 barang_id: it.barang_id,
                 kode: it.barang?.kode ?? "-",
@@ -390,82 +387,164 @@ export default function Penjualan() {
                     </Card>
                 </div>
 
-                {/* RIGHT: Summary + Pay */}
+                {/* RIGHT: Summary + Pay (Receipt DOM) */}
                 <div className="space-y-4">
-                    <Card className="border-primary/30">
-                        <CardHeader className="py-3 px-4 bg-primary/5">
-                            <CardTitle className="text-sm">💰 Ringkasan</CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-4 space-y-3">
+                    <div className="bg-[#f9f9f9] p-5 shadow-[0_2px_10px_rgba(0,0,0,0.1)] border border-slate-300 relative text-slate-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>
+                        {/* decorative jagged top edge */}
+                        <div className="absolute top-0 left-0 right-0 h-1.5 flex" style={{ backgroundImage: "linear-gradient(-45deg, transparent 33.33%, #f9f9f9 33.33%, #f9f9f9 66.66%, transparent 66.66%), linear-gradient(45deg, transparent 33.33%, #f9f9f9 33.33%, #f9f9f9 66.66%, transparent 66.66%)", backgroundSize: "8px 16px", backgroundPosition: "0 -8px", marginTop: "-6px" }}></div>
+                        
+                        {/* Header */}
+                        <div className="text-center border-b-2 border-slate-800 pb-2 mb-2">
+                            <div className="flex justify-center items-center gap-2 mb-1">
+                                <img src="/logo-gia.jpeg" alt="Logo" className="h-10 w-auto mix-blend-multiply" onError={(e) => e.currentTarget.style.display = 'none'} />
+                                <div className="font-extrabold text-2xl tracking-tight leading-none">GIA MULYA</div>
+                            </div>
+                            <div className="text-[10px] leading-[1.2] font-bold">KONSTRUKSI & PEMASANGAN</div>
+                            <div className="text-[10px] leading-[1.2] font-bold">BENGKEL LAS · TOKO BANGUNAN</div>
+                            <div className="text-[9px] leading-[1.2] mt-1 font-semibold">MENERIMA PESANAN:</div>
+                            <div className="text-[9px] leading-[1.2] font-semibold">PAGAR - TERALIS - STAINLESS - KANOPI - GALVALUM - PLAT BAJA</div>
+                            <div className="text-[9px] leading-[1.2] font-semibold mb-1">ALAT-ALAT LISTRIK</div>
+                            <div className="text-[10px] leading-[1.2] font-bold italic">JL. NAGRAK CISAAT NO. 45 SUKABUMI</div>
+                            <div className="text-[10px] leading-[1.2] font-bold italic">HP/WA: 085217147864 / 082111648392</div>
+                        </div>
+
+                        {/* Customer Info */}
+                        <div className="flex justify-between items-end mb-2 text-xs font-bold">
                             <div>
-                                <Label className="text-xs text-muted-foreground">Kepada / Pembeli</Label>
-                                <Input placeholder="Nama pembeli (opsional)" value={pembeli} onChange={e => setPembeli(e.target.value)} className="h-9" />
+                                <span>Nota No. .................</span>
                             </div>
-
-                            <div className="border-t pt-3 space-y-2">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Total Item</span>
-                                    <span className="font-medium">{cart.reduce((s, c) => s + c.jumlah, 0)} pcs</span>
-                                </div>
-                                <div className="flex justify-between text-lg font-bold">
-                                    <span>Total</span>
-                                    <span className="text-primary">{fmt(total)}</span>
-                                </div>
-                            </div>
-
-                            <div className="border-t pt-3 space-y-2">
-                                <div>
-                                    <Label className="text-xs text-muted-foreground">Bayar</Label>
-                                    <Input
-                                        type="text"
-                                        inputMode="numeric"
-                                        placeholder="Jumlah bayar"
-                                        value={bayar}
-                                        onChange={e => {
-                                            // Only allow digits and dots for formatting
-                                            const raw = e.target.value.replace(/[^\d]/g, "");
-                                            if (!raw) { setBayar(""); return; }
-                                            // Auto-format with dots as thousand separators
-                                            const formatted = parseInt(raw, 10).toLocaleString("id-ID");
-                                            setBayar(formatted);
-                                        }}
-                                        className="h-10 text-lg font-bold"
+                            <div className="text-right">
+                                <div>Sukabumi, {new Date().toLocaleDateString("id-ID")}</div>
+                                <div className="flex items-center justify-end mt-1">
+                                    <span className="mr-1">Kepada Yth.</span>
+                                    <input 
+                                        type="text" 
+                                        className="border-b border-dotted border-slate-600 bg-transparent outline-none w-32 text-xs font-bold text-center text-blue-900 placeholder:text-slate-400"
+                                        value={pembeli}
+                                        onChange={e => setPembeli(e.target.value)}
                                     />
                                 </div>
-                                {bayarNum > 0 && (
-                                    <div className={`flex justify-between text-lg font-bold p-2 rounded ${kembali >= 0 ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400" : "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400"}`}>
-                                        <span>Kembali</span>
-                                        <span>{fmt(kembali)}</span>
-                                    </div>
-                                )}
                             </div>
+                        </div>
 
-                            <Button className="w-full h-12 text-lg" onClick={handleSave} disabled={cart.length === 0 || bayarNum < total}>
-                                <Save className="h-5 w-5 mr-2" />
-                                Simpan & Cetak Bon
+                        {/* Table */}
+                        <table className="w-full text-xs border-collapse mb-1 border-t-2 border-b-2 border-slate-800">
+                            <thead>
+                                <tr className="border-b-2 border-slate-800">
+                                    <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center w-12">Banyak<br/>nya</th>
+                                    <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center">Nama Barang</th>
+                                    <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center w-20">Harga<br/>Satuan</th>
+                                    <th className="py-1 px-1 font-extrabold text-center w-24">Jumlah</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {cart.length === 0 ? (
+                                    Array.from({ length: 5 }).map((_, i) => (
+                                        <tr key={i} className="border-b border-slate-400">
+                                            <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                            <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                            <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                            <td className="py-2">&nbsp;</td>
+                                        </tr>
+                                    ))
+                                ) : cart.map((item, i) => (
+                                    <tr key={i} className="border-b border-slate-400">
+                                        <td className="py-1 px-1 border-r-2 border-slate-800 text-center font-bold">{item.jumlah}</td>
+                                        <td className="py-1 px-1 border-r-2 border-slate-800 font-bold">{item.nama}</td>
+                                        <td className="py-1 px-1 border-r-2 border-slate-800 text-right">{item.harga_jual.toLocaleString("id-ID")}</td>
+                                        <td className="py-1 px-1 text-right font-bold">{item.subtotal.toLocaleString("id-ID")}</td>
+                                    </tr>
+                                ))}
+                                {/* Fill remaining space if cart has items but less than 5 */}
+                                {cart.length > 0 && cart.length < 5 && Array.from({ length: 5 - cart.length }).map((_, i) => (
+                                    <tr key={`empty-${i}`} className="border-b border-slate-400">
+                                        <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                        <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                        <td className="py-2 border-r-2 border-slate-800">&nbsp;</td>
+                                        <td className="py-2">&nbsp;</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        {/* Totals & Payments */}
+                        <div className="flex">
+                            <div className="w-12 border-r-2 border-slate-800"></div>
+                            <div className="flex-1 flex flex-col pt-1">
+                                <div className="flex justify-between items-center text-sm font-extrabold px-1 mb-1">
+                                    <span>Jumlah Rp.</span>
+                                    <span>{total.toLocaleString("id-ID")}</span>
+                                </div>
+                                <div className="border-t-2 border-slate-800 w-full mb-1"></div>
+                                <div className="flex justify-between items-center text-xs font-bold px-1 py-0.5">
+                                    <span>Bayar</span>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        placeholder="0"
+                                        value={bayar}
+                                        onChange={e => {
+                                            const raw = e.target.value.replace(/[^\d]/g, "");
+                                            if (!raw) { setBayar(""); return; }
+                                            setBayar(parseInt(raw, 10).toLocaleString("id-ID"));
+                                        }}
+                                        className="border-b border-dotted border-slate-500 bg-transparent outline-none w-24 text-right font-bold text-blue-700"
+                                    />
+                                </div>
+                                <div className="flex justify-between items-center text-xs font-bold px-1 py-0.5 mb-1">
+                                    <span>Kembali</span>
+                                    <span className={kembali >= 0 ? "text-green-700" : "text-red-600"}>
+                                        {bayarNum > 0 ? kembali.toLocaleString("id-ID") : "0"}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="border-t-2 border-slate-800 w-full"></div>
+
+                        {/* Footer Notes */}
+                        <div className="flex justify-between text-xs font-bold mt-2 mb-4">
+                            <div className="text-center pt-1">
+                                <div>Tanda terima,</div>
+                                <div className="mt-8 border-t border-slate-800 w-24 mx-auto"></div>
+                            </div>
+                            <div className="text-center text-[10px] max-w-[120px] pt-4 leading-tight">
+                                <div>Norek:</div>
+                                <div>BCA 377 1202 886</div>
+                                <div>a.n. M. GIFFARY F.</div>
+                            </div>
+                            <div className="text-center pt-1">
+                                <div>Hormat kami,</div>
+                                <div className="mt-8 border-t border-slate-800 w-24 mx-auto"></div>
+                            </div>
+                        </div>
+
+                        {/* Action Button over receipt */}
+                        <div className="mt-6 pt-4 border-t border-dashed border-slate-300">
+                             <Button className="w-full h-11 font-sans text-base shadow-lg hover:-translate-y-0.5 transition-all" onClick={handleSave} disabled={cart.length === 0}>
+                                <Save className="h-5 w-5 mr-2" /> Simpan
                             </Button>
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </div>
 
                     {/* Riwayat Penjualan */}
                     <Card>
                         <CardHeader className="py-3 px-4">
-                            <CardTitle className="text-sm">📋 Riwayat Terakhir</CardTitle>
+                            <CardTitle className="text-sm font-sans flex items-center gap-2"><Eye className="h-4 w-4" /> Riwayat Terakhir</CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
                             {riwayat.length === 0 ? (
                                 <p className="text-center text-muted-foreground text-sm py-4">Belum ada riwayat</p>
                             ) : (
-                                <div className="divide-y">
+                                <div className="divide-y font-sans">
                                     {riwayat.map(r => (
-                                        <div key={r.id} className="px-4 py-2 text-sm flex justify-between items-center hover:bg-muted/50 cursor-pointer" onClick={() => viewBon(r)}>
+                                        <div key={r.id} className="px-4 py-2 text-sm flex justify-between items-center hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => viewBon(r)}>
                                             <div>
                                                 <p className="font-mono text-xs text-muted-foreground">{r.nomor_bon}</p>
                                                 <p className="text-xs">{new Date(r.tanggal).toLocaleDateString("id-ID")} {r.pembeli ? `· ${r.pembeli}` : ""}</p>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <span className="font-bold text-sm">{fmt(Number(r.total))}</span>
-                                                <Eye className="h-4 w-4 text-muted-foreground" />
+                                                <span className="font-bold text-sm text-green-700">{fmt(Number(r.total))}</span>
+                                                <Printer className="h-3 w-3 text-muted-foreground" />
                                             </div>
                                         </div>
                                     ))}

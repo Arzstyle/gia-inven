@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { logAktivitas } from "@/hooks/useLogAktivitas";
@@ -15,20 +16,20 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Plus, Search, Filter, X, Check, ChevronsUpDown, Eye, Printer, TrendingUp, Package, DollarSign, CalendarDays, RotateCcw } from "lucide-react";
+import { Plus, Search, Filter, X, Check, ChevronsUpDown, Eye, Printer, TrendingUp, Package, DollarSign, CalendarDays, RotateCcw, Folder, FolderOpen, FileText, ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
 
-type Periode = "harian" | "mingguan" | "bulanan";
+type Periode = "harian" | "mingguan" | "bulanan" | "kustom";
 
 function getDateRange(periode: Periode): { start: string; end: string } {
   const now = new Date();
   const end = now.toISOString().split("T")[0];
   let start: Date;
-  if (periode === "harian") { start = new Date(now); }
+  if (periode === "harian" || periode === "kustom") { start = new Date(now); }
   else if (periode === "mingguan") { start = new Date(now); start.setDate(start.getDate() - 7); }
   else { start = new Date(now.getFullYear(), now.getMonth(), 1); }
   return { start: start.toISOString().split("T")[0], end };
@@ -60,26 +61,37 @@ export default function StokKeluar() {
   const [dialogKat, setDialogKat] = useState("all");
   const [dialogSub, setDialogSub] = useState("all");
 
+  // Arsip Nota state
+  const [arsipData, setArsipData] = useState<any[]>([]);
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
+  const [expandedDates, setExpandedDates] = useState<string[]>([]);
+  const [bonOpen, setBonOpen] = useState(false);
+  const [savedBon, setSavedBon] = useState<any>(null);
+
   // When periode changes, update date range
   useEffect(() => {
-    const range = getDateRange(periode);
-    setDateStart(range.start);
-    setDateEnd(range.end);
+    if (periode !== "kustom") {
+      const range = getDateRange(periode);
+      setDateStart(range.start);
+      setDateEnd(range.end);
+    }
   }, [periode]);
 
   const fetchData = async () => {
-    const [skRes, brgRes, katRes, subRes] = await Promise.all([
+    const [skRes, brgRes, katRes, subRes, penRes] = await Promise.all([
       supabase.from("stok_keluar").select("*, barang(kode, nama, stok, harga_beli, harga_jual, kategori_id, subkategori_id)")
         .gte("tanggal", dateStart).lte("tanggal", dateEnd)
         .order("created_at", { ascending: false }),
       supabase.from("barang").select("id, kode, nama, stok, harga_beli, harga_jual, kategori_id, subkategori_id").order("nama"),
       supabase.from("kategori").select("*").order("nama"),
       supabase.from("subkategori").select("*").order("nama"),
+      supabase.from("penjualan").select("*, penjualan_item(jumlah, harga_jual, subtotal, barang(kode, nama))").order("tanggal", { ascending: false })
     ]);
     setData(skRes.data ?? []);
     setBarangList(brgRes.data ?? []);
     setKategoriList(katRes.data ?? []);
     setSubkategoriList(subRes.data ?? []);
+    setArsipData(penRes.data ?? []);
   };
   useEffect(() => { fetchData(); }, [dateStart, dateEnd]);
 
@@ -153,6 +165,58 @@ export default function StokKeluar() {
   };
 
   const periodeLabel = periode === "harian" ? "Hari Ini" : periode === "mingguan" ? "7 Hari Terakhir" : "Bulan Ini";
+
+  // Arsip Tree Logic
+  const toggleMonth = (monthKey: string) => setExpandedMonths(prev => prev.includes(monthKey) ? prev.filter(m => m !== monthKey) : [...prev, monthKey]);
+  const toggleDate = (dateKey: string) => setExpandedDates(prev => prev.includes(dateKey) ? prev.filter(d => d !== dateKey) : [...prev, dateKey]);
+
+  const groupedArsip = useMemo(() => {
+    const groups: Record<string, Record<string, any[]>> = {};
+    arsipData.forEach(p => {
+        const d = new Date(p.tanggal);
+        const monthKey = d.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+        const dateKey = d.toLocaleDateString('id-ID');
+        if (!groups[monthKey]) groups[monthKey] = {};
+        if (!groups[monthKey][dateKey]) groups[monthKey][dateKey] = [];
+        groups[monthKey][dateKey].push(p);
+    });
+    return groups;
+  }, [arsipData]);
+
+  const handleMonthClick = (monthKey: string, firstItemDate: string) => {
+      toggleMonth(monthKey);
+      const d = new Date(firstItemDate);
+      const start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
+      const end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split("T")[0];
+      setPeriode("kustom");
+      setDateStart(start);
+      setDateEnd(end);
+  };
+
+  const handleDateClick = (dateKey: string, dateStr: string) => {
+      toggleDate(dateKey);
+      setPeriode("kustom");
+      setDateStart(dateStr);
+      setDateEnd(dateStr);
+  };
+
+  const viewArsipBon = (penjualan: any) => {
+        setSavedBon({
+            nomor_bon: penjualan.nomor_bon,
+            tanggal: new Date(penjualan.tanggal),
+            pembeli: penjualan.pembeli,
+            items: (penjualan.penjualan_item ?? []).map((it: any) => ({
+                jumlah: it.jumlah,
+                nama: it.barang?.nama ?? "-",
+                harga_jual: Number(it.harga_jual),
+                subtotal: Number(it.subtotal),
+            })),
+            total: Number(penjualan.total),
+            bayar: Number(penjualan.bayar),
+            kembali: Number(penjualan.kembali),
+        });
+        setBonOpen(true);
+  };
 
   const handleResetData = async () => {
     setConfirmReset(false);
@@ -271,12 +335,19 @@ export default function StokKeluar() {
       </div>
 
       {hasFilters && (
-        <p className="text-xs text-muted-foreground">{filteredData.length} dari {data.length} transaksi</p>
+        <p className="text-xs text-muted-foreground mb-4">{filteredData.length} dari {data.length} transaksi</p>
       )}
 
-      {/* Table */}
-      <div className="rounded-md border overflow-auto">
-        <Table>
+      {/* Main Tabs */}
+      <Tabs defaultValue="riwayat" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="riwayat">Riwayat Barang Keluar</TabsTrigger>
+          <TabsTrigger value="arsip">Arsip Nota Penjualan</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="riwayat" className="m-0">
+          <div className="rounded-md border overflow-auto">
+            <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-8">#</TableHead>
@@ -347,6 +418,77 @@ export default function StokKeluar() {
           </TableBody>
         </Table>
       </div>
+        </TabsContent>
+
+        <TabsContent value="arsip" className="m-0">
+            <Card>
+              <CardContent className="p-4">
+                  {Object.keys(groupedArsip).length === 0 ? (
+                      <p className="text-center text-muted-foreground py-8">Belum ada arsip penjualan</p>
+                  ) : (
+                      <div className="space-y-2 font-sans">
+                          {Object.entries(groupedArsip).map(([monthKey, dates]) => {
+                              const isExpanded = expandedMonths.includes(monthKey);
+                              const firstItemDate = Object.values(dates)[0][0].tanggal;
+                              return (
+                                  <div key={monthKey} className="border rounded-md overflow-hidden">
+                                      <div 
+                                          className="flex items-center gap-2 bg-muted/30 p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                                          onClick={() => handleMonthClick(monthKey, firstItemDate)}
+                                      >
+                                          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                          {isExpanded ? <FolderOpen className="h-5 w-5 text-blue-500" /> : <Folder className="h-5 w-5 text-blue-500" />}
+                                          <span className="font-bold">{monthKey}</span>
+                                          <Badge variant="secondary" className="ml-auto">{Object.values(dates).flat().length} Transaksi</Badge>
+                                      </div>
+                                      
+                                      {isExpanded && (
+                                          <div className="pl-6 py-2 pr-2 space-y-2 bg-white dark:bg-slate-950">
+                                              {Object.entries(dates).map(([dateKey, items]) => {
+                                                  const isDateExpanded = expandedDates.includes(dateKey);
+                                                  const dateStr = items[0].tanggal;
+                                                  return (
+                                                      <div key={dateKey} className="border-l-2 border-slate-200 dark:border-slate-800 ml-3 pl-3">
+                                                          <div 
+                                                              className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-muted/50"
+                                                              onClick={() => handleDateClick(dateKey, dateStr)}
+                                                          >
+                                                              {isDateExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                                                              {isDateExpanded ? <FolderOpen className="h-4 w-4 text-orange-400" /> : <Folder className="h-4 w-4 text-orange-400" />}
+                                                              <span className="font-semibold text-sm">{dateKey}</span>
+                                                          </div>
+
+                                                          {isDateExpanded && (
+                                                              <div className="pl-6 py-1 space-y-1">
+                                                                  {items.map(p => (
+                                                                      <div 
+                                                                          key={p.id} 
+                                                                          className="flex items-center justify-between p-2 rounded hover:bg-muted cursor-pointer text-sm"
+                                                                          onClick={() => viewArsipBon(p)}
+                                                                      >
+                                                                          <div className="flex items-center gap-2">
+                                                                              <FileText className="h-4 w-4 text-slate-400" />
+                                                                              <span>{p.pembeli ? `${p.pembeli}` : `Pembeli Umum`} <span className="text-muted-foreground text-xs ml-1">({p.nomor_bon})</span></span>
+                                                                          </div>
+                                                                          <span className="font-mono font-bold text-green-600 dark:text-green-400">{fmt(Number(p.total))}</span>
+                                                                      </div>
+                                                                  ))}
+                                                              </div>
+                                                          )}
+                                                      </div>
+                                                  )
+                                              })}
+                                          </div>
+                                      )}
+                                  </div>
+                              )
+                          })}
+                      </div>
+                  )}
+              </CardContent>
+            </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* DIALOG TAMBAH STOK KELUAR */}
       <Dialog open={open} onOpenChange={setOpen}>
@@ -434,6 +576,114 @@ export default function StokKeluar() {
         confirmLabel="Ya, Reset Semua"
         onConfirm={handleResetData}
       />
+
+      {/* BON PREVIEW DIALOG */}
+      <Dialog open={bonOpen} onOpenChange={setBonOpen}>
+          <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Bon Penjualan</DialogTitle></DialogHeader>
+
+              {/* Printable Bon DOM */}
+              <div className="bg-[#f9f9f9] p-5 shadow-[0_2px_10px_rgba(0,0,0,0.1)] border border-slate-300 relative text-slate-900" style={{ fontFamily: "'Courier New', Courier, monospace" }}>
+                  {/* decorative jagged top edge */}
+                  <div className="absolute top-0 left-0 right-0 h-1.5 flex" style={{ backgroundImage: "linear-gradient(-45deg, transparent 33.33%, #f9f9f9 33.33%, #f9f9f9 66.66%, transparent 66.66%), linear-gradient(45deg, transparent 33.33%, #f9f9f9 33.33%, #f9f9f9 66.66%, transparent 66.66%)", backgroundSize: "8px 16px", backgroundPosition: "0 -8px", marginTop: "-6px" }}></div>
+                  
+                  {/* Header */}
+                  <div className="text-center border-b-2 border-slate-800 pb-2 mb-2">
+                      <div className="flex justify-center items-center gap-2 mb-1">
+                          <img src="/logo-gia.jpeg" alt="Logo" className="h-10 w-auto mix-blend-multiply" onError={(e) => e.currentTarget.style.display = 'none'} />
+                          <div className="font-extrabold text-2xl tracking-tight leading-none">GIA MULYA</div>
+                      </div>
+                      <div className="text-[10px] leading-[1.2] font-bold">KONSTRUKSI & PEMASANGAN</div>
+                      <div className="text-[10px] leading-[1.2] font-bold">BENGKEL LAS · TOKO BANGUNAN</div>
+                      <div className="text-[9px] leading-[1.2] mt-1 font-semibold">MENERIMA PESANAN:</div>
+                      <div className="text-[9px] leading-[1.2] font-semibold">PAGAR - TERALIS - STAINLESS - KANOPI - GALVALUM - PLAT BAJA</div>
+                      <div className="text-[9px] leading-[1.2] font-semibold mb-1">ALAT-ALAT LISTRIK</div>
+                      <div className="text-[10px] leading-[1.2] font-bold italic">JL. NAGRAK CISAAT NO. 45 SUKABUMI</div>
+                      <div className="text-[10px] leading-[1.2] font-bold italic">HP/WA: 085217147864 / 082111648392</div>
+                  </div>
+
+                  {/* Customer Info */}
+                  <div className="flex justify-between items-end mb-2 text-xs font-bold">
+                      <div>
+                          <span>Nota No. {savedBon?.nomor_bon}</span>
+                      </div>
+                      <div className="text-right">
+                          <div>Sukabumi, {savedBon?.tanggal ? new Date(savedBon.tanggal).toLocaleDateString("id-ID") : "-"}</div>
+                          <div className="flex items-center justify-end mt-1">
+                              <span className="mr-1">Kepada Yth.</span>
+                              <span className="border-b border-dotted border-slate-600 w-32 text-center text-blue-900 inline-block">{savedBon?.pembeli || "................."}</span>
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Table */}
+                  <table className="w-full text-xs border-collapse mb-1 border-t-2 border-b-2 border-slate-800">
+                      <thead>
+                          <tr className="border-b-2 border-slate-800">
+                              <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center w-12">Banyak<br/>nya</th>
+                              <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center">Nama Barang</th>
+                              <th className="py-1 px-1 border-r-2 border-slate-800 font-extrabold text-center w-20">Harga<br/>Satuan</th>
+                              <th className="py-1 px-1 font-extrabold text-center w-24">Jumlah</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {savedBon?.items?.map((item: any, i: number) => (
+                              <tr key={i} className="border-b border-slate-400">
+                                  <td className="py-1 px-1 border-r-2 border-slate-800 text-center font-bold">{item.jumlah}</td>
+                                  <td className="py-1 px-1 border-r-2 border-slate-800 font-bold">{item.nama}</td>
+                                  <td className="py-1 px-1 border-r-2 border-slate-800 text-right">{item.harga_jual.toLocaleString("id-ID")}</td>
+                                  <td className="py-1 px-1 text-right font-bold">{item.subtotal.toLocaleString("id-ID")}</td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+
+                  {/* Totals & Payments */}
+                  <div className="flex">
+                      <div className="w-12 border-r-2 border-slate-800"></div>
+                      <div className="flex-1 flex flex-col pt-1">
+                          <div className="flex justify-between items-center text-sm font-extrabold px-1 mb-1">
+                              <span>Jumlah Rp.</span>
+                              <span>{savedBon?.total?.toLocaleString("id-ID")}</span>
+                          </div>
+                          <div className="border-t-2 border-slate-800 w-full mb-1"></div>
+                          <div className="flex justify-between items-center text-xs font-bold px-1 py-0.5">
+                              <span>Bayar</span>
+                              <span className="border-b border-dotted border-slate-500 w-24 text-right text-blue-700">{savedBon?.bayar?.toLocaleString("id-ID")}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs font-bold px-1 py-0.5 mb-1">
+                              <span>Kembali</span>
+                              <span className={savedBon?.kembali >= 0 ? "text-green-700" : "text-red-600"}>
+                                  {savedBon?.kembali?.toLocaleString("id-ID")}
+                              </span>
+                          </div>
+                      </div>
+                  </div>
+                  <div className="border-t-2 border-slate-800 w-full"></div>
+
+                  {/* Footer Notes */}
+                  <div className="flex justify-between text-xs font-bold mt-2 mb-4">
+                      <div className="text-center pt-1">
+                          <div>Tanda terima,</div>
+                          <div className="mt-8 border-t border-slate-800 w-24 mx-auto"></div>
+                      </div>
+                      <div className="text-center text-[10px] max-w-[120px] pt-4 leading-tight">
+                          <div>Norek:</div>
+                          <div>BCA 377 1202 886</div>
+                          <div>a.n. M. GIFFARY F.</div>
+                      </div>
+                      <div className="text-center pt-1">
+                          <div>Hormat kami,</div>
+                          <div className="mt-8 border-t border-slate-800 w-24 mx-auto"></div>
+                      </div>
+                  </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={() => setBonOpen(false)}>Tutup</Button>
+              </DialogFooter>
+          </DialogContent>
+      </Dialog>
     </div>
   );
 }

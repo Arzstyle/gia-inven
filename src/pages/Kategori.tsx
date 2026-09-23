@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -51,14 +52,27 @@ export default function KategoriPage() {
   const brgDefault = { kode: "", nama: "", harga_beli: "0", harga_jual: "0", satuan: "pcs", tambah_stok: "0", stok_minimum: "0" };
   const [formBrg, setFormBrg] = useState(brgDefault);
 
-  // Fetch
+  const [subItemCounts, setSubItemCounts] = useState<Record<string, number>>({});
+
   const fetchCategories = async () => {
     const { data } = await supabase.from("kategori").select("*").order("nama");
     setCategories(data ?? []);
   };
   const fetchSubcategories = async (katId: string) => {
-    const { data } = await supabase.from("subkategori").select("*").eq("kategori_id", katId).order("nama");
-    setSubcategories(data ?? []);
+    const [subRes, brgRes] = await Promise.all([
+      supabase.from("subkategori").select("*").eq("kategori_id", katId).order("nama"),
+      supabase.from("barang").select("subkategori_id"),
+    ]);
+    setSubcategories(subRes.data ?? []);
+    if (brgRes.data) {
+      const counts: Record<string, number> = {};
+      brgRes.data.forEach((b: any) => {
+        if (b.subkategori_id) {
+          counts[b.subkategori_id] = (counts[b.subkategori_id] || 0) + 1;
+        }
+      });
+      setSubItemCounts(counts);
+    }
   };
   const fetchItems = async (subId: string) => {
     const { data } = await supabase.from("barang").select("*, subkategori(nama)").eq("subkategori_id", subId).order("kode");
@@ -145,6 +159,36 @@ export default function KategoriPage() {
     }
     setOpenSub(false);
     if (selectedCategory) fetchSubcategories(selectedCategory.id);
+  };
+
+  const handleDeleteSub = async (sub: Subkategori, e: React.MouseEvent) => {
+    e.stopPropagation();
+    // Cek apakah masih ada barang di dalam subkategori ini
+    const { count } = await supabase
+      .from("barang")
+      .select("*", { count: "exact", head: true })
+      .eq("subkategori_id", sub.id);
+
+    if (count && count > 0) {
+      toast.error(`Tidak bisa hapus: masih ada ${count} barang di subkategori ini`);
+      return;
+    }
+
+    setConfirmState({
+      open: true,
+      title: "Hapus Subkategori",
+      description: `Apakah Anda yakin ingin menghapus subkategori "${sub.nama}"? Tindakan ini tidak dapat dibatalkan.`,
+      variant: "danger",
+      confirmLabel: "Ya, Hapus",
+      onConfirm: async () => {
+        setConfirmState(p => ({ ...p, open: false }));
+        const { error } = await supabase.from("subkategori").delete().eq("id", sub.id);
+        if (error) { toast.error(error.message); return; }
+        await logAktivitas("Hapus Subkategori", `Menghapus subkategori: ${sub.nama}`);
+        toast.success("Subkategori dihapus");
+        if (selectedCategory) fetchSubcategories(selectedCategory.id);
+      },
+    });
   };
 
   // Barang CRUD
@@ -405,11 +449,23 @@ export default function KategoriPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-base truncate">{sub.nama}</h3>
-                  <p className="text-xs text-muted-foreground mt-1">Lihat barang →</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs text-muted-foreground">Lihat barang →</p>
+                    {subItemCounts[sub.id] !== undefined && (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                        {subItemCounts[sub.id]} item
+                      </Badge>
+                    )}
+                  </div>
                 </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => openEditSub(sub, e)}>
-                  <Pencil className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => openEditSub(sub, e)} title="Edit">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={(e) => handleDeleteSub(sub, e)} title="Hapus">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </CardContent>
             </Card>
