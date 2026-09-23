@@ -123,18 +123,66 @@ export default function KategoriPage() {
   };
   const handleDeleteKat = async (k: Kategori, e: React.MouseEvent) => {
     e.stopPropagation();
+    // 1. Ambil semua subkategori di kategori ini
+    const { data: subs } = await supabase.from("subkategori").select("id, nama").eq("kategori_id", k.id);
+    const subIds = (subs ?? []).map(s => s.id);
+
+    // 2. Ambil semua barang yang terkait kategori ini secara unik (baik via kategori_id langsung atau via subkategori)
+    let barangQuery = supabase.from("barang").select("id");
+    if (subIds.length > 0) {
+      barangQuery = barangQuery.or(`kategori_id.eq.${k.id},subkategori_id.in.(${subIds.join(",")})`);
+    } else {
+      barangQuery = barangQuery.eq("kategori_id", k.id);
+    }
+    const { data: relatedBarang } = await barangQuery;
+    const barangIds = (relatedBarang ?? []).map(b => b.id);
+    const totalBarang = barangIds.length;
+
+    const subInfo = subIds.length > 0 ? `${subIds.length} subkategori` : "";
+    const brgInfo = totalBarang > 0 ? `${totalBarang} barang` : "";
+    const extraInfo = [subInfo, brgInfo].filter(Boolean).join(" dan ");
+
     setConfirmState({
       open: true,
       title: "Hapus Kategori",
-      description: `Apakah Anda yakin ingin menghapus kategori "${k.nama}"? Semua subkategori di dalamnya juga akan terhapus.`,
+      description: `Apakah Anda yakin ingin menghapus kategori "${k.nama}"?${extraInfo ? ` Semua ${extraInfo} di dalamnya juga akan ikut terhapus.` : ""} Tindakan ini tidak dapat dibatalkan.`,
       variant: "danger",
-      confirmLabel: "Ya, Hapus",
+      confirmLabel: totalBarang > 0 || subIds.length > 0 ? "Ya, Hapus Semua" : "Ya, Hapus",
       onConfirm: async () => {
         setConfirmState(p => ({ ...p, open: false }));
-        const { error } = await supabase.from("kategori").delete().eq("id", k.id);
-        if (error) { toast.error(error.message); return; }
-        toast.success("Kategori dihapus");
-        fetchCategories();
+        try {
+          // 1. Hapus semua barang yang terkait berdasarkan ID unik
+          if (barangIds.length > 0) {
+            const { error: brgErr } = await supabase.from("barang").delete().in("id", barangIds);
+            if (brgErr) { toast.error("Gagal menghapus barang: " + brgErr.message); return; }
+          }
+          // Pembersihan tambahan memastikan tidak ada barang tertinggal
+          if (subIds.length > 0) {
+            await supabase.from("barang").delete().in("subkategori_id", subIds);
+          }
+          await supabase.from("barang").delete().eq("kategori_id", k.id);
+
+          // 2. Hapus semua subkategori di kategori ini
+          await supabase.from("subkategori").delete().eq("kategori_id", k.id);
+
+          // 3. Hapus kategori
+          const { error } = await supabase.from("kategori").delete().eq("id", k.id);
+          if (error) { toast.error(error.message); return; }
+
+          await logAktivitas("Hapus Kategori", `Menghapus kategori: ${k.nama} (${extraInfo || "kosong"})`);
+          toast.success(`Kategori "${k.nama}" beserta isinya berhasil dihapus`);
+
+          if (selectedCategory?.id === k.id) {
+            setSelectedCategory(null);
+            setSelectedSubcategory(null);
+            setSubcategories([]);
+            setItems([]);
+            setView("kategori");
+          }
+          fetchCategories();
+        } catch (err: any) {
+          toast.error("Gagal menghapus: " + err.message);
+        }
       },
     });
   };
@@ -163,30 +211,37 @@ export default function KategoriPage() {
 
   const handleDeleteSub = async (sub: Subkategori, e: React.MouseEvent) => {
     e.stopPropagation();
-    // Cek apakah masih ada barang di dalam subkategori ini
+    // Hitung jumlah barang di subkategori ini
     const { count } = await supabase
       .from("barang")
       .select("*", { count: "exact", head: true })
       .eq("subkategori_id", sub.id);
-
-    if (count && count > 0) {
-      toast.error(`Tidak bisa hapus: masih ada ${count} barang di subkategori ini`);
-      return;
-    }
+    const totalBarang = count ?? 0;
 
     setConfirmState({
       open: true,
       title: "Hapus Subkategori",
-      description: `Apakah Anda yakin ingin menghapus subkategori "${sub.nama}"? Tindakan ini tidak dapat dibatalkan.`,
+      description: totalBarang > 0
+        ? `Apakah Anda yakin ingin menghapus subkategori "${sub.nama}"? ${totalBarang} barang di dalamnya juga akan ikut terhapus. Tindakan ini tidak dapat dibatalkan.`
+        : `Apakah Anda yakin ingin menghapus subkategori "${sub.nama}"? Tindakan ini tidak dapat dibatalkan.`,
       variant: "danger",
-      confirmLabel: "Ya, Hapus",
+      confirmLabel: totalBarang > 0 ? "Ya, Hapus Semua" : "Ya, Hapus",
       onConfirm: async () => {
         setConfirmState(p => ({ ...p, open: false }));
-        const { error } = await supabase.from("subkategori").delete().eq("id", sub.id);
-        if (error) { toast.error(error.message); return; }
-        await logAktivitas("Hapus Subkategori", `Menghapus subkategori: ${sub.nama}`);
-        toast.success("Subkategori dihapus");
-        if (selectedCategory) fetchSubcategories(selectedCategory.id);
+        try {
+          // 1. Hapus semua barang di subkategori ini
+          if (totalBarang > 0) {
+            await supabase.from("barang").delete().eq("subkategori_id", sub.id);
+          }
+          // 2. Hapus subkategori
+          const { error } = await supabase.from("subkategori").delete().eq("id", sub.id);
+          if (error) { toast.error(error.message); return; }
+          await logAktivitas("Hapus Subkategori", `Menghapus subkategori: ${sub.nama}${totalBarang > 0 ? ` (${totalBarang} barang ikut dihapus)` : ""}`);
+          toast.success(`Subkategori "${sub.nama}" berhasil dihapus`);
+          if (selectedCategory) fetchSubcategories(selectedCategory.id);
+        } catch (err: any) {
+          toast.error("Gagal menghapus: " + err.message);
+        }
       },
     });
   };

@@ -27,3 +27,10 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Vite temporary files
+*.timestamp-*.mjs
+
+# Local helper / dev scripts
+*.cjs
+seed_admin.*

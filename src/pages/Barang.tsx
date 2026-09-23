@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, ArrowUpDown, RotateCcw, Layers } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, ArrowUpDown, RotateCcw, Layers, TrendingUp } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const fmt = (n: number) => `Rp ${n.toLocaleString("id-ID")}`;
@@ -26,9 +26,16 @@ export default function BarangPage() {
   const [sortBy, setSortBy] = useState<"huruf" | "huruf_desc" | "tanggal">("huruf");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const formDefault = { kode: "", nama: "", harga_beli: "", harga_jual: "", kategori_id: "", subkategori_id: "", satuan: "pcs", tambah_stok: "", stok_minimum: "" };
+  const formDefault = { kode: "", nama: "", harga_beli: "", harga_jual: "", kategori_id: "", subkategori_id: "", satuan: "", tambah_stok: "", stok_minimum: "" };
   const [form, setForm] = useState(formDefault);
   const [confirmState, setConfirmState] = useState<{ open: boolean; title: string; description: string; variant: "danger" | "warning"; onConfirm: () => void }>({ open: false, title: "", description: "", variant: "danger", onConfirm: () => { } });
+
+  // Inline create kategori/subkategori
+  const [newKatMode, setNewKatMode] = useState(false);
+  const [newKatNama, setNewKatNama] = useState("");
+  const [newSubMode, setNewSubMode] = useState(false);
+  const [newSubNama, setNewSubNama] = useState("");
+  const [savingNew, setSavingNew] = useState(false);
 
   const fetchData = async () => {
     const [brgRes, katRes, subRes] = await Promise.all([
@@ -50,6 +57,18 @@ export default function BarangPage() {
   useEffect(() => { fetchData(); }, []);
 
   const filteredSub = subkategoriList.filter(s => s.kategori_id === form.kategori_id);
+
+  // Generate kode berdasarkan subkategori
+  const generateKode = async (subId: string) => {
+    const sub = subkategoriList.find(s => s.id === subId);
+    if (!sub) return `BRG-${Math.floor(1000 + Math.random() * 9000)}`;
+    // Buat prefix dari 3 huruf pertama subkategori (uppercase)
+    const prefix = sub.nama.replace(/[^a-zA-Z]/g, "").substring(0, 3).toUpperCase() || "BRG";
+    // Hitung jumlah barang di subkategori ini untuk urutan
+    const { count } = await supabase.from("barang").select("*", { count: "exact", head: true }).eq("subkategori_id", subId);
+    const nextNum = (count ?? 0) + 1;
+    return `${prefix}-${String(nextNum).padStart(3, "0")}`;
+  };
   const filtered = data
     .filter(d => {
       const matchSearch =
@@ -78,87 +97,144 @@ export default function BarangPage() {
     setEditing(null);
     const autoCode = `BRG-${Math.floor(1000 + Math.random() * 9000)}`;
     setForm({ ...formDefault, kode: autoCode });
+    setNewKatMode(false); setNewKatNama("");
+    setNewSubMode(false); setNewSubNama("");
     setOpen(true);
+  };
+
+  const handleHargaChange = (field: "harga_beli" | "harga_jual", rawVal: string) => {
+    const numericOnly = rawVal.replace(/[^0-9]/g, "");
+    setForm(p => ({ ...p, [field]: numericOnly }));
   };
 
   const openEdit = (b: any) => {
     setEditing(b);
+    const matchedKatId =
+      b.kategori_id ||
+      subkategoriList.find(s => s.id === b.subkategori_id)?.kategori_id ||
+      "";
+
     setForm({
-      kode: b.kode,
-      nama: b.nama,
-      harga_beli: b.harga_beli ? String(b.harga_beli) : "",
-      harga_jual: b.harga_jual ? String(b.harga_jual) : "",
-      kategori_id: b.kategori_id ?? "",
+      kode: b.kode ?? "",
+      nama: b.nama ?? "",
+      harga_beli: b.harga_beli !== null && b.harga_beli !== undefined && b.harga_beli !== 0 ? String(b.harga_beli) : "",
+      harga_jual: b.harga_jual !== null && b.harga_jual !== undefined && b.harga_jual !== 0 ? String(b.harga_jual) : "",
+      kategori_id: matchedKatId,
       subkategori_id: b.subkategori_id ?? "",
-      satuan: b.satuan,
+      satuan: b.satuan ?? "",
       tambah_stok: "",
       stok_minimum: b.stok_minimum ? String(b.stok_minimum) : "",
     });
+    setNewKatMode(false); setNewKatNama("");
+    setNewSubMode(false); setNewSubNama("");
     setOpen(true);
   };
 
   const handleSave = async () => {
     if (!form.kode.trim() || !form.nama.trim()) { toast.error("Kode dan Nama wajib diisi"); return; }
+    if (!form.satuan) { toast.error("Satuan wajib dipilih"); return; }
+    if (newKatMode && !newKatNama.trim()) { toast.error("Nama kategori baru wajib diisi"); return; }
+    if (newSubMode && !newSubNama.trim()) { toast.error("Nama subkategori baru wajib diisi"); return; }
 
-    const harga_beli = parseInt(form.harga_beli) || 0;
-    const harga_jual = parseInt(form.harga_jual) || 0;
-    const tambah_stok = parseInt(form.tambah_stok) || 0;
-    const stok_minimum = parseInt(form.stok_minimum) || 0;
+    setSavingNew(true);
+    let finalKatId = form.kategori_id;
+    let finalSubId = form.subkategori_id;
 
-    if (editing) {
-      // --- EDIT BARANG ---
-      const updatePayload: any = {
-        kode: form.kode,
-        nama: form.nama,
-        harga_beli,
-        harga_jual,
-        kategori_id: form.kategori_id || null,
-        subkategori_id: form.subkategori_id || null,
-        satuan: form.satuan,
-        stok_minimum,
-      };
+    // Pastikan kategori_id terisi jika subkategori dipilih
+    if (!finalKatId && finalSubId) {
+      const foundSub = subkategoriList.find(s => s.id === finalSubId);
+      if (foundSub?.kategori_id) {
+        finalKatId = foundSub.kategori_id;
+      }
+    }
 
-      const { error } = await supabase.from("barang").update(updatePayload).eq("id", editing.id);
-      if (error) { toast.error(error.message); return; }
-
-      // Catat ke stok_masuk & log aktivitas
-      if (tambah_stok > 0) {
-        await supabase.from("stok_masuk").insert({
-          barang_id: editing.id,
-          jumlah: tambah_stok,
-          tanggal: new Date().toISOString().split("T")[0],
-          keterangan: "Tambah Stok via Data Barang",
-          user_id: user?.id ?? null,
-        });
-        // Ambil stok terbaru untuk log
-        const { data: freshData } = await supabase.from("barang").select("stok").eq("id", editing.id).single();
-        const newTotal = freshData?.stok ?? tambah_stok;
-        await logAktivitas("Tambah Stok", `${form.nama} +${tambah_stok} (Total: ${newTotal})`);
-        toast.success(`Stok ${form.nama} bertambah +${tambah_stok} (Total: ${newTotal})`);
-      } else {
-        await logAktivitas("Edit Barang", `${form.nama} diperbarui`);
-        toast.success("Barang diperbarui");
+    try {
+      // --- Create new kategori if needed ---
+      if (newKatMode && newKatNama.trim()) {
+        const { data: newKat, error: katErr } = await supabase.from("kategori").insert({ nama: newKatNama.trim() }).select().single();
+        if (katErr) { toast.error(`Gagal buat kategori: ${katErr.message}`); setSavingNew(false); return; }
+        finalKatId = newKat.id;
+        await logAktivitas("Tambah Kategori", `${newKatNama.trim()} (via Data Barang)`);
       }
 
-    } else {
-      // --- TAMBAH BARANG BARU ---
-      const { error } = await supabase.from("barang").insert({
-        kode: form.kode,
-        nama: form.nama,
-        harga_beli,
-        harga_jual,
-        kategori_id: form.kategori_id || null,
-        subkategori_id: form.subkategori_id || null,
-        satuan: form.satuan,
-        stok: tambah_stok,
-        stok_minimum,
-      });
-      if (error) { toast.error(error.message); return; }
-      await logAktivitas("Tambah Barang", `${form.kode} - ${form.nama} (Stok: ${tambah_stok})`);
-      toast.success("Barang ditambahkan");
+      // --- Create new subkategori if needed ---
+      if (newSubMode && newSubNama.trim()) {
+        if (!finalKatId) { toast.error("Pilih atau buat kategori terlebih dahulu"); setSavingNew(false); return; }
+        const { data: newSub, error: subErr } = await supabase.from("subkategori").insert({ nama: newSubNama.trim(), kategori_id: finalKatId }).select().single();
+        if (subErr) { toast.error(`Gagal buat subkategori: ${subErr.message}`); setSavingNew(false); return; }
+        finalSubId = newSub.id;
+        await logAktivitas("Tambah Subkategori", `${newSubNama.trim()} (via Data Barang)`);
+        // Re-generate kode based on new sub
+        const prefix = newSubNama.trim().replace(/[^a-zA-Z]/g, "").substring(0, 3).toUpperCase() || "BRG";
+        setForm(p => ({ ...p, kode: `${prefix}-001` }));
+      }
+
+      const harga_beli = parseNum(form.harga_beli);
+      const harga_jual = parseNum(form.harga_jual);
+      const tambah_stok = parseNum(form.tambah_stok);
+      const stok_minimum = parseNum(form.stok_minimum);
+      // Use the latest kode (may have been updated by sub creation)
+      const finalKode = (newSubMode && newSubNama.trim())
+        ? `${newSubNama.trim().replace(/[^a-zA-Z]/g, "").substring(0, 3).toUpperCase() || "BRG"}-001`
+        : form.kode;
+
+      if (editing) {
+        // --- EDIT BARANG ---
+        const updatePayload: any = {
+          kode: finalKode,
+          nama: form.nama,
+          harga_beli,
+          harga_jual,
+          kategori_id: finalKatId || null,
+          subkategori_id: finalSubId || null,
+          satuan: form.satuan,
+          stok_minimum,
+        };
+
+        const { error } = await supabase.from("barang").update(updatePayload).eq("id", editing.id);
+        if (error) { toast.error(error.message); setSavingNew(false); return; }
+
+        // Catat ke stok_masuk & log aktivitas
+        if (tambah_stok > 0) {
+          await supabase.from("stok_masuk").insert({
+            barang_id: editing.id,
+            jumlah: tambah_stok,
+            tanggal: new Date().toISOString().split("T")[0],
+            keterangan: "Tambah Stok via Data Barang",
+            user_id: user?.id ?? null,
+          });
+          // Ambil stok terbaru untuk log
+          const { data: freshData } = await supabase.from("barang").select("stok").eq("id", editing.id).single();
+          const newTotal = freshData?.stok ?? tambah_stok;
+          await logAktivitas("Tambah Stok", `${form.nama} +${tambah_stok} (Total: ${newTotal})`);
+          toast.success(`Stok ${form.nama} bertambah +${tambah_stok} (Total: ${newTotal})`);
+        } else {
+          await logAktivitas("Edit Barang", `${form.nama} diperbarui`);
+          toast.success("Barang diperbarui");
+        }
+
+      } else {
+        // --- TAMBAH BARANG BARU ---
+        const { error } = await supabase.from("barang").insert({
+          kode: finalKode,
+          nama: form.nama,
+          harga_beli,
+          harga_jual,
+          kategori_id: finalKatId || null,
+          subkategori_id: finalSubId || null,
+          satuan: form.satuan,
+          stok: tambah_stok,
+          stok_minimum,
+        });
+        if (error) { toast.error(error.message); setSavingNew(false); return; }
+        await logAktivitas("Tambah Barang", `${finalKode} - ${form.nama} (Stok: ${tambah_stok})`);
+        toast.success("Barang ditambahkan");
+      }
+      setOpen(false);
+      fetchData();
+    } finally {
+      setSavingNew(false);
     }
-    setOpen(false);
-    fetchData();
   };
 
   const handleDelete = async (b: any) => {
@@ -194,9 +270,9 @@ export default function BarangPage() {
     });
   };
 
-  // Profit calculation for form preview
-  const formBeli = parseInt(form.harga_beli) || 0;
-  const formJual = parseInt(form.harga_jual) || 0;
+  const parseNum = (v: any) => parseInt(String(v || "").replace(/[^0-9]/g, "")) || 0;
+  const formBeli = parseNum(form.harga_beli);
+  const formJual = parseNum(form.harga_jual);
   const formProfit = formJual - formBeli;
   const formMargin = formBeli > 0 ? Math.round((formProfit / formBeli) * 100) : 0;
 
@@ -344,13 +420,46 @@ export default function BarangPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-center gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => openEdit(b)} title="Edit">
+                        <Button 
+                          type="button"
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 text-slate-600 hover:text-blue-700 hover:bg-blue-50" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openEdit(b);
+                          }} 
+                          title="Edit"
+                        >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500 hover:text-orange-600 hover:bg-orange-50" onClick={() => handleResetStok(b)} title="Reset Stok">
+                        <Button 
+                          type="button"
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 text-orange-500 hover:text-orange-600 hover:bg-orange-50" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleResetStok(b);
+                          }} 
+                          title="Reset Stok"
+                        >
                           <RotateCcw className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleDelete(b)} title="Hapus">
+                        <Button 
+                          type="button"
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 text-destructive hover:bg-destructive/10" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDelete(b);
+                          }} 
+                          title="Hapus"
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -363,58 +472,229 @@ export default function BarangPage() {
         </div>
       </div>
 
+      {/* Dialog Tambah / Edit Barang */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{editing ? "Edit" : "Tambah"} Barang</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2"><Label>Kode (Otomatis)</Label><Input value={form.kode} readOnly className="bg-muted" /></div>
-            <div className="col-span-2"><Label>Nama Barang</Label><Input value={form.nama} onChange={e => setForm(p => ({ ...p, nama: e.target.value }))} /></div>
+        <DialogContent className="max-w-md">
+          <form onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
+            <DialogHeader>
+              <DialogTitle>{editing ? "Edit" : "Tambah"} Barang</DialogTitle>
+            </DialogHeader>
 
-            <div>
-              <Label>Kategori</Label>
-              <Select value={form.kategori_id} onValueChange={v => setForm(p => ({ ...p, kategori_id: v, subkategori_id: "" }))}>
-                <SelectTrigger><SelectValue placeholder="Pilih Kategori" /></SelectTrigger>
-                <SelectContent>{kategoriList.map(k => <SelectItem key={k.id} value={k.id}>{k.nama}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Subkategori</Label>
-              <Select value={form.subkategori_id} onValueChange={v => setForm(p => ({ ...p, subkategori_id: v }))}>
-                <SelectTrigger><SelectValue placeholder="Pilih Sub" /></SelectTrigger>
-                <SelectContent>{filteredSub.map(s => <SelectItem key={s.id} value={s.id}>{s.nama}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label>Harga Beli (Rp)</Label>
-              <Input type="number" value={form.harga_beli} onChange={e => setForm(p => ({ ...p, harga_beli: e.target.value }))} placeholder="Harga modal" />
-            </div>
-            <div>
-              <Label>Harga Jual (Rp)</Label>
-              <Input type="number" value={form.harga_jual} onChange={e => setForm(p => ({ ...p, harga_jual: e.target.value }))} placeholder="Harga jual" />
-            </div>
-
-            {/* Live profit preview */}
-            {(formBeli > 0 || formJual > 0) && (
-              <div className="col-span-2 rounded-lg bg-muted/50 p-3 flex items-center gap-3">
-                <TrendingUp className={`h-5 w-5 ${formProfit >= 0 ? "text-green-600" : "text-red-500"}`} />
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Keuntungan: </span>
-                  <span className={`font-bold ${formProfit >= 0 ? "text-green-600" : "text-red-500"}`}>
-                    {formProfit >= 0 ? "+" : ""}{fmt(formProfit)}
-                  </span>
-                  {formBeli > 0 && (
-                    <span className="text-muted-foreground ml-2">({formMargin}%)</span>
-                  )}
-                </div>
+            <div className="grid grid-cols-2 gap-3 py-3">
+              <div className="col-span-2">
+                <Label>Kode (Otomatis)</Label>
+                <Input value={form.kode} readOnly className="bg-muted font-mono" />
               </div>
-            )}
+              <div className="col-span-2">
+                <Label>Nama Barang *</Label>
+                <Input 
+                  value={form.nama} 
+                  onChange={e => setForm(p => ({ ...p, nama: e.target.value }))} 
+                  placeholder="Nama barang..."
+                  required
+                />
+              </div>
 
-            <div><Label>Satuan</Label><Input value={form.satuan} onChange={e => setForm(p => ({ ...p, satuan: e.target.value }))} /></div>
-            <div><Label>Tambah Stok</Label><Input type="number" value={form.tambah_stok} onChange={e => setForm(p => ({ ...p, tambah_stok: e.target.value }))} placeholder="0" /></div>
-            <div><Label>Stok Minimum</Label><Input type="number" value={form.stok_minimum} onChange={e => setForm(p => ({ ...p, stok_minimum: e.target.value }))} placeholder="0" /></div>
-          </div>
-          <DialogFooter><Button onClick={handleSave}>{editing ? "Simpan" : "Tambah"}</Button></DialogFooter>
+              <div>
+                <Label>Kategori</Label>
+                {newKatMode ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        value={newKatNama}
+                        onChange={e => setNewKatNama(e.target.value)}
+                        placeholder="Nama kategori baru..."
+                        className="bg-white border-emerald-300 focus-visible:ring-emerald-400"
+                        autoFocus
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-slate-400 hover:text-red-500 shrink-0"
+                        onClick={() => { setNewKatMode(false); setNewKatNama(""); }}
+                        title="Batal"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                    <p className="text-xs text-emerald-600">Kategori baru akan dibuat otomatis saat simpan</p>
+                  </div>
+                ) : (
+                  <Select 
+                    value={form.kategori_id || undefined} 
+                    onValueChange={v => {
+                      if (v === "__new__") {
+                        setNewKatMode(true);
+                        setForm(p => ({ ...p, kategori_id: "", subkategori_id: "" }));
+                        setNewSubMode(false); setNewSubNama("");
+                        return;
+                      }
+                      setForm(p => ({ ...p, kategori_id: v, subkategori_id: "" }));
+                    }}
+                  >
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Pilih Kategori" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__new__" className="text-emerald-600 font-semibold border-b mb-1 pb-1">
+                        + Kategori Baru
+                      </SelectItem>
+                      {kategoriList.filter(k => k.id).map(k => (
+                        <SelectItem key={k.id} value={k.id}>{k.nama}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              <div>
+                <Label>Subkategori</Label>
+                {newSubMode ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        value={newSubNama}
+                        onChange={e => setNewSubNama(e.target.value)}
+                        placeholder="Nama subkategori baru..."
+                        className="bg-white border-emerald-300 focus-visible:ring-emerald-400"
+                        autoFocus
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-slate-400 hover:text-red-500 shrink-0"
+                        onClick={() => { setNewSubMode(false); setNewSubNama(""); }}
+                        title="Batal"
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                    <p className="text-xs text-emerald-600">Subkategori baru akan dibuat otomatis saat simpan</p>
+                  </div>
+                ) : (
+                  <Select 
+                    value={form.subkategori_id || undefined} 
+                    onValueChange={async v => {
+                      if (v === "__new_sub__") {
+                        setNewSubMode(true);
+                        setForm(p => ({ ...p, subkategori_id: "" }));
+                        return;
+                      }
+                      const foundSub = subkategoriList.find(s => s.id === v);
+                      const newKode = await generateKode(v);
+                      setForm(p => ({
+                        ...p,
+                        subkategori_id: v,
+                        kategori_id: foundSub?.kategori_id || p.kategori_id,
+                        kode: editing ? p.kode : newKode,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="bg-white">
+                      <SelectValue placeholder="Pilih Sub" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__new_sub__" className="text-emerald-600 font-semibold border-b mb-1 pb-1">
+                        + Subkategori Baru
+                      </SelectItem>
+                      {(form.kategori_id 
+                        ? subkategoriList.filter(s => s.kategori_id === form.kategori_id) 
+                        : subkategoriList
+                      ).filter(s => s.id).map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.nama}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              <div>
+                <Label>Harga Beli (Rp)</Label>
+                <Input 
+                  type="text"
+                  inputMode="numeric"
+                  value={form.harga_beli ? Number(form.harga_beli).toLocaleString("id-ID") : ""} 
+                  onChange={e => handleHargaChange("harga_beli", e.target.value)} 
+                  placeholder="0" 
+                />
+              </div>
+
+              <div>
+                <Label>Harga Jual (Rp)</Label>
+                <Input 
+                  type="text"
+                  inputMode="numeric"
+                  value={form.harga_jual ? Number(form.harga_jual).toLocaleString("id-ID") : ""} 
+                  onChange={e => handleHargaChange("harga_jual", e.target.value)} 
+                  placeholder="0" 
+                />
+              </div>
+
+              {/* Live profit preview */}
+              {(formBeli > 0 || formJual > 0) && (
+                <div className="col-span-2 rounded-lg bg-blue-50/70 border border-blue-100 p-2.5 flex items-center gap-3">
+                  <TrendingUp className={`h-5 w-5 ${formProfit >= 0 ? "text-emerald-600" : "text-red-500"}`} />
+                  <div className="text-sm">
+                    <span className="text-muted-foreground text-xs">Perkiraan Margin: </span>
+                    <span className={`font-bold ${formProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                      {formProfit >= 0 ? "+" : ""}{fmt(formProfit)}
+                    </span>
+                    {formBeli > 0 && (
+                      <span className="text-muted-foreground text-xs ml-2">({formMargin}%)</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label>Satuan *</Label>
+                <Select value={form.satuan || undefined} onValueChange={v => setForm(p => ({ ...p, satuan: v }))}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="Pilih Satuan" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from(new Set([
+                      ...(form.satuan ? [form.satuan] : []),
+                      "pcs", "kg", "meter", "liter", "batang", "lembar", "sak", "roll", "set", "dus", "kaleng", "galon"
+                    ])).map(s => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>Tambah Stok</Label>
+                <Input 
+                  type="number" 
+                  value={form.tambah_stok} 
+                  onChange={e => setForm(p => ({ ...p, tambah_stok: e.target.value }))} 
+                  placeholder="0" 
+                />
+              </div>
+
+              <div className="col-span-2">
+                <Label>Stok Minimum</Label>
+                <Input 
+                  type="number" 
+                  value={form.stok_minimum} 
+                  onChange={e => setForm(p => ({ ...p, stok_minimum: e.target.value }))} 
+                  placeholder="0" 
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="mt-2 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Batal
+              </Button>
+              <Button type="submit" disabled={savingNew}>
+                {savingNew ? "Menyimpan..." : (editing ? "Simpan Perubahan" : "Tambah Barang")}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

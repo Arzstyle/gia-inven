@@ -100,21 +100,27 @@ export default function SubkategoriPage() {
 
   const handleDelete = async (s: any) => {
     const count = itemCounts[s.id] || 0;
-    if (count > 0) {
-      toast.error(`Tidak bisa hapus: masih ada ${count} barang di subkategori ini`);
-      return;
-    }
     setConfirmState({ open: true, target: s });
   };
   const executeDelete = async () => {
     const s = confirmState.target;
     setConfirmState({ open: false, target: null });
     if (!s) return;
-    const { error } = await supabase.from("subkategori").delete().eq("id", s.id);
-    if (error) { toast.error(error.message); return; }
-    await logAktivitas("Hapus Subkategori", `Menghapus subkategori: ${s.nama}`);
-    toast.success("Subkategori dihapus");
-    fetchData();
+    try {
+      const count = itemCounts[s.id] || 0;
+      // 1. Hapus semua barang di subkategori ini
+      if (count > 0) {
+        await supabase.from("barang").delete().eq("subkategori_id", s.id);
+      }
+      // 2. Hapus subkategori
+      const { error } = await supabase.from("subkategori").delete().eq("id", s.id);
+      if (error) { toast.error(error.message); return; }
+      await logAktivitas("Hapus Subkategori", `Menghapus subkategori: ${s.nama}${count > 0 ? ` (${count} barang ikut dihapus)` : ""}`);
+      toast.success(`Subkategori "${s.nama}" berhasil dihapus`);
+      fetchData();
+    } catch (err: any) {
+      toast.error("Gagal menghapus: " + err.message);
+    }
   };
 
   const openPreview = async (s: any) => {
@@ -358,9 +364,14 @@ export default function SubkategoriPage() {
         open={confirmState.open}
         onOpenChange={(o) => setConfirmState(p => ({ ...p, open: o }))}
         title="Hapus Subkategori"
-        description={`Apakah Anda yakin ingin menghapus subkategori "${confirmState.target?.nama}"? Tindakan ini tidak dapat dibatalkan.`}
+        description={(() => {
+          const count = confirmState.target ? (itemCounts[confirmState.target.id] || 0) : 0;
+          return count > 0
+            ? `Apakah Anda yakin ingin menghapus subkategori "${confirmState.target?.nama}"? ${count} barang di dalamnya juga akan ikut terhapus. Tindakan ini tidak dapat dibatalkan.`
+            : `Apakah Anda yakin ingin menghapus subkategori "${confirmState.target?.nama}"? Tindakan ini tidak dapat dibatalkan.`;
+        })()}
         variant="danger"
-        confirmLabel="Ya, Hapus"
+        confirmLabel={confirmState.target && (itemCounts[confirmState.target.id] || 0) > 0 ? "Ya, Hapus Semua" : "Ya, Hapus"}
         onConfirm={executeDelete}
       />
     </div>
